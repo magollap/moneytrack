@@ -6,15 +6,22 @@ macOS, and Linux — with no mandatory cloud services.
 
 ---
 
-## 🌟 Features
+## ✨ What it does
 
-- 📁 **CSV/TSV import** — drag & drop a bank or card statement.
-- 🧠 **Auto-categorisation** — Dining Out, Subscriptions, Fees, Groceries, Transport, Utilities, Housing.
-- 🚨 **Waste detection** — flags leaky spend and projects the annual cost plus 10-year opportunity cost of investing it.
-- 📊 **Analytics dashboard** — totals, category chart, detailed breakdown.
-- 🔐 **Self-registration login** — first account created becomes the admin.
-- 🧪 **Demo mode** — one click loads 90 days of realistic sample transactions.
-- 🎨 **OLED dark theme** — React + Vite + Tailwind, responsive for a future mobile build.
+Import a bank statement and MoneyTrack shows where the money went, which
+merchants are leaking it, and what those habits cost over ten years.
+
+| Screen | Purpose |
+|---|---|
+| **Overview** | Four KPIs, daily spend trend, category donut, top waste merchants, recent activity |
+| **Transactions** | Search, filter by category or waste, export the filtered set to CSV |
+| **Import** | Drag-and-drop CSV/TSV, sample file, one-click 90-day demo dataset |
+| **Settings** | Account, runtime health (DB, platform, uptime, memory), demo reset, sign out |
+
+- 🔐 **Self-registration** — the first account in an empty database becomes the admin.
+- 🧠 **Auto-categorisation** — Dining, Groceries, Transport, Utilities, Subscriptions, Fees.
+- 🚨 **Waste radar** — dining, subscriptions and fees are flagged and projected annually.
+- 🎨 **OLED dark dashboard** — React 19, Vite, Tailwind v4, Recharts, Lucide; designed mobile-first.
 - 🐘 **SQLite by default, PostgreSQL when you need scale.**
 
 ---
@@ -23,17 +30,46 @@ macOS, and Linux — with no mandatory cloud services.
 
 Requirements: **Node.js 20+**.
 
+### Installer
+
+```bash
+# macOS / Linux / Raspberry Pi
+chmod +x scripts/install.sh && ./scripts/install.sh --seed
+```
+
+```powershell
+# Windows PowerShell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\scripts\install.ps1 -Seed
+```
+
+### Or manually
+
 ```bash
 git clone git@github.com:magollap/moneytrack.git
 cd moneytrack
 npm install
-npm run db:push     # create the SQLite schema
-npm run db:seed     # demo user + 90 days of data
+npm run db:push
+npm run db:seed   # demo user + 90 days of data
 npm run build
-npm run server      # http://localhost:4000
+npm start         # http://localhost:4000
 ```
 
 **Demo login:** `demo` / `demo123` (admin).
+
+### Start / stop / status
+
+```bash
+./scripts/moneytrack.sh start | stop | restart | status | logs
+```
+
+```powershell
+.\scripts\moneytrack.ps1 start | stop | restart | status | logs
+```
+
+Custom port: `PORT=4100 ./scripts/moneytrack.sh start` or `-Port 4100`.
+For boot-time supervision see systemd / launchd / NSSM examples in the install
+guide.
 
 ### Development
 
@@ -42,31 +78,26 @@ npm run server   # API on :4000
 npm run dev      # UI on :5173 (proxies /api)
 ```
 
-### Auth model
-
-Open the app, enter any new username + password to self-register. The **first
-user in an empty database becomes admin**. Existing usernames require the
-matching password.
-
 ---
 
-## 📚 Documentation
-
-- 🏗️ [Architecture](./docs/ARCHITECTURE.md) — data model, request lifecycle, deployment, hardening.
-- 🔌 [API reference](./docs/API.md) — endpoints, payloads, status codes.
-- 📦 [Installation](./docs/INSTALL.md) — Windows/macOS/Linux, start/stop/status, PostgreSQL, Raspberry Pi.
-- 🎨 [Design system](./design-system/moneytrack/MASTER.md) — tokens and rules.
-
----
-
-## 🛠️ Tech stack
+## 🧱 Tech stack
 
 | Area | Choice |
 |---|---|
 | Frontend | React 19, Vite, Tailwind CSS v4, Recharts, lucide-react |
 | Backend | Node.js, Express 5, multer |
 | Data | Prisma 7, SQLite (libSQL adapter), optional PostgreSQL |
-| Design | `ui-ux-pro-max` generated OLED dark system |
+| Design | `ui-ux-pro-max` OLED dark system, Fira Sans / Fira Code |
+
+---
+
+## 📚 Documentation
+
+- 🏗️ [Architecture](./docs/ARCHITECTURE.md) — data model, API lifecycle, frontend structure, deployment.
+- 🔌 [API reference](./docs/API.md) — endpoints, payloads, filters, status codes.
+- 🎨 [Design](./docs/DESIGN.md) — tokens, typography, layout, charts, accessibility, mobile path.
+- 📦 [Installation](./docs/INSTALL.md) — installers, service management, PostgreSQL, Raspberry Pi.
+- 🎛️ [Design system source](./design-system/moneytrack/MASTER.md).
 
 ---
 
@@ -75,17 +106,23 @@ matching password.
 ```
 server.js              Express API + serves dist/
 src/
-  App.jsx              auth gate + dashboard shell
-  components/
-    AuthPage.jsx       register/login
-    TransactionUpload.jsx
-    AnalyticsSummary.jsx
-  lib/db.js            Prisma client (libSQL adapter)
-prisma/
-  schema.prisma        User, Account, Transaction, Budget
-scripts/seed.js        demo user + generated transactions
-docs/                  architecture, API, install
+  App.jsx              auth gate, hash router, data loading
+  components/          AppShell, AuthPage, ui primitives, charts
+  pages/               Overview, Transactions, Import, Settings
+  lib/                 api client, formatting, category colours
+prisma/schema.prisma   User, Account, Transaction, Budget
+scripts/               installers, seed, start/stop/status
+docs/                  architecture, API, design, install
 ```
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Password hashing + session tokens (documented hardening path)
+- [ ] Budgets per category with progress bars
+- [ ] React Native / Expo client reusing the same API
+- [ ] Multi-account imports and reconciliation
 
 ---
 

@@ -89,7 +89,8 @@ Upload a CSV/TSV statement. Header row containing `date` is skipped. Each row:
 ### `GET /transactions`
 
 **Query:** `start_date`, `end_date`, `category`, `account_id`, `is_waste`
-(`true`/`false`). Returns up to 200 rows, newest first.
+(`true`/`false`), `q` (description contains), `limit` (max 2000, default 500).
+Returns rows newest first.
 
 ```json
 {
@@ -122,17 +123,29 @@ Upload a CSV/TSV statement. Header row containing `date` is skipped. Each row:
 {
   "success": true,
   "data": {
-    "period": "Last 90 days",
-    "total_spent": 1882.22,
-    "waste_total": 464.47,
-    "annual_waste_projection": 5573.64,
-    "potential_investment_value_10yr": 80392.7,
+    "period": "2026-08-23 → 2026-11-19",
+    "total_spent": 1232.86,
+    "waste_total": 521.28,
+    "annual_waste_projection": 6255.36,
+    "potential_investment_value_10yr": 90204.11,
+    "transaction_count": 36,
+    "avg_daily_spend": 13.85,
+    "waste_share": 42.3,
     "categories": [
-      { "name": "Dining Out", "amount": 226.12, "percentage": 12, "is_waste": true }
+      { "name": "Dining Out", "amount": 226.12, "percentage": 18.3, "is_waste": true }
+    ],
+    "daily": [
+      { "date": "2026-08-23", "amount": 84.2, "waste": 0 }
+    ],
+    "top_waste": [
+      { "description": "UBER EATS LATE NIGHT", "amount": 158.19 }
     ]
   }
 }
 ```
+
+`period` is derived from the oldest and newest transaction. `daily` is the
+series used by the trend chart; `top_waste` drives the merchant ranking.
 
 Category rules: Dining Out, Subscriptions and Fees are flagged as waste.
 The 10-year figure assumes the monthly waste amount is invested at 7% APY with

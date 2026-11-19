@@ -1,3 +1,91 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, monospace;
+
+  --color-canvas: #020617;
+  --color-surface: #0e1223;
+  --color-surface-2: #131a2c;
+  --color-line: #1e293b;
+  --color-line-strong: #334155;
+  --color-ink: #f8fafc;
+  --color-muted: #94a3b8;
+  --color-faint: #64748b;
+  --color-accent: #22c55e;
+  --color-accent-soft: #16a34a;
+  --color-danger: #ef4444;
+  --color-warn: #fbbf24;
+  --color-info: #38bdf8;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    min-height: 100dvh;
+  }
+
+  /* Visible keyboard focus everywhere */
+  :focus-visible {
+    outline: 2px solid #22c55e;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  button,
+  [role="button"],
+  a,
+  select,
+  summary {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: #22c55e33;
+  }
+
+  /* Thin scrollbars inside panels */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .card {
+    @apply bg-surface border border-line rounded-2xl;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  }
+
+  .card-hover {
+    @apply transition-all duration-200;
+  }
+  .card-hover:hover {
+    border-color: #334155;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 16px 32px -16px rgb(34 197 94 / 0.18);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 0 1px #22c55e33, 0 0 24px -6px #22c55e55;
+  }
+
+  .num {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+}

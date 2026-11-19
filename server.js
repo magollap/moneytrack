@@ -111,7 +111,7 @@ app.get('/api/v1/transactions', async (req, res) => {
     const userId = req.headers['x-user-id'];
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized user' });
 
-    const { start_date, end_date, category, account_id, is_waste } = req.query;
+    const { start_date, end_date, category, account_id, is_waste, q, limit } = req.query;
     const where = { userId };
     if (start_date || end_date) {
       where.date = {};
@@ -121,11 +121,12 @@ app.get('/api/v1/transactions', async (req, res) => {
     if (category) where.category = category;
     if (account_id) where.accountId = account_id;
     if (is_waste !== undefined) where.isWaste = is_waste === 'true';
+    if (q) where.description = { contains: q };
 
     const data = await prisma.transaction.findMany({
       where,
       orderBy: { date: 'desc' },
-      take: 200
+      take: Math.min(Number(limit) || 500, 2000),
     });
 
     res.json({ success: true, data });
@@ -205,6 +206,8 @@ function categorize(desc) {
 
 function buildSummary(rows) {
   const categoryMap = {};
+  const dailyMap = {};
+  const wasteMerchants = {};
   let totalSpent = 0;
   let wasteTotal = 0;
 
@@ -215,6 +218,40 @@ function buildSummary(rows) {
     if (!categoryMap[t.category]) categoryMap[t.category] = { amount: 0, isWaste: t.isWaste };
     categoryMap[t.category].amount += amount;
     if (t.isWaste) categoryMap[t.category].isWaste = true;
+
+    const day = new Date(t.date).toISOString().slice(0, 10);
+    dailyMap[day] = dailyMap[day] || { amount: 0, waste: 0 };
+    dailyMap[day].amount += amount;
+    if (t.isWaste) dailyMap[day].waste += amount;
+
+    if (t.isWaste) {
+      wasteMerchants[t.description] = (wasteMerchants[t.description] || 0) + amount;
+    }
+  }
+
+  const daily = Object.entries(dailyMap)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, v]) => ({
+      date,
+      amount: Number(v.amount.toFixed(2)),
+      waste: Number(v.waste.toFixed(2)),
+    }));
+
+  const topWaste = Object.entries(wasteMerchants)
+    .map(([description, amount]) => ({ description, amount: Number(amount.toFixed(2)) }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+
+  const sortedRows = [...rows].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const firstDay = sortedRows.length ? new Date(sortedRows[sortedRows.length - 1].date) : null;
+  const lastDay = sortedRows.length ? new Date(sortedRows[0].date) : null;
+  const days = firstDay && lastDay
+    ? Math.max(1, Math.round((lastDay - firstDay) / 86400000) + 1)
+    : 1;
+
+  let period = 'Last 90 days';
+  if (firstDay && lastDay) {
+    period = `${firstDay.toISOString().slice(0, 10)} → ${lastDay.toISOString().slice(0, 10)}`;
   }
 
   const categories = Object.entries(categoryMap)
@@ -232,12 +269,17 @@ function buildSummary(rows) {
   const futureValue = annualWaste / 12 * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate);
 
   return {
-    period: 'Last 90 days',
+    period,
     total_spent: Number(totalSpent.toFixed(2)),
     waste_total: Number(wasteTotal.toFixed(2)),
     annual_waste_projection: Number(annualWaste.toFixed(2)),
     potential_investment_value_10yr: Number(futureValue.toFixed(2)),
-    categories
+    transaction_count: rows.length,
+    avg_daily_spend: Number((totalSpent / days).toFixed(2)),
+    waste_share: totalSpent > 0 ? Number(((wasteTotal / totalSpent) * 100).toFixed(1)) : 0,
+    categories,
+    daily,
+    top_waste: topWaste,
   };
 }
 

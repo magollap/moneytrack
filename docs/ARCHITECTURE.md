@@ -74,6 +74,34 @@ Indexes worth adding as data grows: `Transaction(userId, date)` and
 4. **Demo** — `POST /api/v1/demo/load` replaces the user's transactions with
    90 days of generated data for instant exploration.
 
+## 4b. Frontend structure
+
+```
+src/
+  App.jsx                 auth gate, hash router, data loading
+  components/
+    AppShell.jsx          sidebar (≥1024px) + bottom nav (<1024px)
+    AuthPage.jsx          register/login split screen
+    ui.jsx                Card, Button, Badge, Spinner, EmptyState, ErrorNote
+    charts.jsx            area trend + category donut (Recharts)
+  pages/
+    Overview.jsx          KPI strip, trend, donut, waste ranking, recent list
+    Transactions.jsx      search / category / waste filters, CSV export
+    Import.jsx            dropzone, demo loader, parsing explainer
+    Settings.jsx          account, runtime status, data controls
+  lib/
+    api.js                fetch wrapper, adds x-user-id
+    format.js             currency, dates, category colours
+```
+
+Routing is `location.hash` (`#overview`, `#transactions`, `#import`,
+`#settings`) so the back button and deep links work without a router
+dependency. All server state is fetched in `App.jsx` and passed down; views are
+pure renderers, which keeps a future React Native client easy to align.
+
+Visual rules, tokens, breakpoints and accessibility checks live in
+[`DESIGN.md`](./DESIGN.md).
+
 ## 5. Waste model
 
 A transaction is "waste" when its category is one of:

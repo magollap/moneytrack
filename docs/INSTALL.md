@@ -7,6 +7,18 @@ VMs. Requirements: **Node.js 20+** and npm. No Docker is required.
 
 ## 1. Any OS — from source
 
+### Automated installer
+
+| OS | Command |
+|---|---|
+| macOS / Linux / Raspberry Pi | `chmod +x scripts/install.sh && ./scripts/install.sh --seed` |
+| Windows (PowerShell) | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; .\scripts\install.ps1 -Seed` |
+
+The installer verifies Node 20+, installs dependencies, creates the SQLite
+schema, optionally seeds demo data, and builds the production bundle.
+
+### Manual steps
+
 ```bash
 git clone git@github.com:magollap/moneytrack.git
 cd moneytrack
@@ -42,17 +54,43 @@ first user in an empty database becomes admin.
 | Command | Purpose |
 |---|---|
 | `npm run dev` | Vite dev server on :5173 (proxies `/api`) |
-| `npm run server` | Express API + built UI on :4000 |
+| `npm run start` | Express API + built UI on :4000 |
 | `npm run build` | Production bundle into `dist/` |
 | `npm run db:push` | Sync schema to the SQLite file |
 | `npm run db:seed` | Insert demo user + transactions |
 | `npm run db:studio` | Browse the database |
+| `npm run app:start` / `app:stop` / `app:status` | Control script (macOS/Linux) |
 
 ---
 
 ## 2. Start / stop / status
 
-### Linux (systemd)
+### Built-in control scripts
+
+macOS / Linux:
+
+```bash
+./scripts/moneytrack.sh start     # background process, PID file, logs/moneytrack.log
+./scripts/moneytrack.sh status    # API health JSON
+./scripts/moneytrack.sh stop
+./scripts/moneytrack.sh restart
+./scripts/moneytrack.sh logs
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\moneytrack.ps1 start
+.\scripts\moneytrack.ps1 status
+.\scripts\moneytrack.ps1 stop
+```
+
+Both scripts accept a custom port (`PORT=4100 ./scripts/moneytrack.sh start`
+or `-Port 4100`). `npm run app:start|app:stop|app:status` wraps the Unix script.
+
+### Run as a system service
+
+#### Linux (systemd)
 
 `/etc/systemd/system/moneytrack.service`:
 
@@ -82,7 +120,6 @@ journalctl -u moneytrack -f          # logs
 ```
 
 ### macOS (launchd)
-
 `~/Library/LaunchAgents/com.moneytrack.app.plist`:
 
 ```xml
@@ -105,7 +142,7 @@ launchctl stop com.moneytrack.app     # stop
 launchctl start com.moneytrack.app    # start
 ```
 
-### Windows
+#### Windows
 
 Run in PowerShell:
 

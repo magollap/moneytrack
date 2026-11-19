@@ -5,7 +5,11 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
+    "start": "node server.js",
     "server": "node server.js",
+    "app:start": "bash scripts/moneytrack.sh start",
+    "app:stop": "bash scripts/moneytrack.sh stop",
+    "app:status": "bash scripts/moneytrack.sh status",
     "db:push": "prisma7 db push",
     "db:studio": "prisma7 studio",
     "db:seed": "node scripts/seed.js",
