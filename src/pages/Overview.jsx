@@ -9,7 +9,7 @@ import {
   Flame,
   ArrowRight,
 } from 'lucide-react'
-import { Card, CardHeader, Badge, Button, EmptyState, ErrorNote } from '../components/ui'
+import { Card, CardHeader, Badge, Button, EmptyState, ErrorNote, Spinner } from '../components/ui'
 import { SpendTrendChart, CategoryDonut } from '../components/charts'
 import { currency, shortDate } from '../lib/format'
 
@@ -37,7 +37,15 @@ function KpiCard({ label, value, sub, icon: Icon, tone = 'default', badge }) {
   )
 }
 
-export default function Overview({ user, summary, transactions, onNavigate, onRefresh, refreshing, error }) {
+export default function Overview({ user, summary, transactions, onNavigate, onRefresh, refreshing, loading, error }) {
+  if (loading && !summary) {
+    return (
+      <Card>
+        <Spinner label="Loading your dashboard" />
+      </Card>
+    )
+  }
+
   if (!summary) {
     return (
       <Card>
