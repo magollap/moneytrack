@@ -1,134 +1,169 @@
-# MoneyTrack REST API Documentation
+# MoneyTrack REST API
 
-Base URL: `/api/v1`
+Base URL: `http://localhost:4000/api/v1` (dev proxy: `http://localhost:5173/api/v1`)
 
-All responses return standard JSON format:
+Response envelope:
+
+```json
+{ "success": true, "data": { } }
+{ "success": false, "error": "message" }
+```
+
+Authenticated endpoints require the header `x-user-id: <user id>` returned by
+the login call.
+
+---
+
+## 1. Auth
+
+### `POST /auth/login`
+
+Self-registration + login in one call.
+
+**Body**
+```json
+{ "username": "demo", "password": "demo123" }
+```
+
+**Behaviour**
+- Unknown username → account is created.
+- First account in the database → `isAdmin: true`.
+- Existing username → password must match, otherwise `401`.
+
+**Response 200**
 ```json
 {
   "success": true,
-  "data": { ... },
-  "error": null
+  "data": {
+    "id": "95774478-f66a-442f-a7e5-dfbc51861009",
+    "username": "demo",
+    "isAdmin": true,
+    "createdAt": "2026-11-19T21:33:35.969Z"
+  }
+}
+```
+
+**Errors** — `400` missing fields, `401` invalid password, `500` server error.
+
+---
+
+## 2. Demo data
+
+### `POST /demo/load`
+
+Replaces the current user's transactions with 90 days of generated demo data.
+
+**Headers:** `x-user-id`
+
+**Response 200:** same payload shape as `GET /analytics/summary`.
+
+---
+
+## 3. Transactions
+
+### `POST /transactions/upload`
+
+Upload a CSV/TSV statement. Header row containing `date` is skipped. Each row:
+`date, description, amount` (comma or tab separated).
+
+**Headers:** `x-user-id`
+**Body:** `multipart/form-data`, field `file`
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "period": "Last 90 days",
+    "total_spent": 1882.22,
+    "waste_total": 464.47,
+    "annual_waste_projection": 5573.64,
+    "potential_investment_value_10yr": 80392.7,
+    "categories": [
+      { "name": "Groceries", "amount": 656, "percentage": 34.9, "is_waste": false }
+    ]
+  }
+}
+```
+
+### `GET /transactions`
+
+**Query:** `start_date`, `end_date`, `category`, `account_id`, `is_waste`
+(`true`/`false`). Returns up to 200 rows, newest first.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "…",
+      "userId": "…",
+      "accountId": null,
+      "date": "2026-11-18T00:00:00.000Z",
+      "description": "DOORDASH*SUSHI PALACE",
+      "amount": 42.5,
+      "category": "Dining Out",
+      "isWaste": true,
+      "notes": null
+    }
+  ]
 }
 ```
 
 ---
 
-## 1. System & Health
+## 4. Analytics
+
+### `GET /analytics/summary`
+
+**Headers:** `x-user-id`
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": "Last 90 days",
+    "total_spent": 1882.22,
+    "waste_total": 464.47,
+    "annual_waste_projection": 5573.64,
+    "potential_investment_value_10yr": 80392.7,
+    "categories": [
+      { "name": "Dining Out", "amount": 226.12, "percentage": 12, "is_waste": true }
+    ]
+  }
+}
+```
+
+Category rules: Dining Out, Subscriptions and Fees are flagged as waste.
+The 10-year figure assumes the monthly waste amount is invested at 7% APY with
+monthly compounding.
+
+---
+
+## 5. System
 
 ### `GET /system/status`
-Returns server operational status, active database backend, and platform runtime.
 
-**Response (200 OK):**
 ```json
 {
   "status": "online",
   "version": "1.0.0",
   "db_type": "sqlite",
-  "db_path": "/var/lib/moneytrack/moneytrack.db",
   "platform": "linux",
-  "uptime_seconds": 14250,
-  "memory_usage_mb": 42.5
+  "uptime_seconds": 16,
+  "memory_usage_mb": 22
 }
 ```
 
-### `POST /system/control`
-Triggers service management actions (restart, reload DB connection, flush cache).
-
-**Body:**
-```json
-{
-  "action": "reload_db"
-}
-```
+`db_type` reports `postgresql` when `DATABASE_URL` is set.
 
 ---
 
-## 2. Accounts (`/accounts`)
+## Status codes
 
-### `GET /accounts`
-Retrieves all managed bank and credit card accounts with current balances.
-
-**Response (200 OK):**
-```json
-[
-  {
-    "id": "acc_chase_main",
-    "name": "Chase Sapphire Reserve",
-    "type": "credit_card",
-    "institution": "Chase",
-    "last4": "4812",
-    "balance": 1240.50,
-    "limit": 10000.00,
-    "currency": "USD",
-    "updated_at": "2026-11-19T14:30:00Z"
-  }
-]
-```
-
----
-
-## 3. Transactions (`/transactions`)
-
-### `GET /transactions`
-Queries filtered list of transactions. Supports pagination, date range, and category filters.
-
-**Query Parameters:**
-- `start_date` (ISO date, e.g., `2026-11-01`)
-- `end_date` (ISO date, e.g., `2026-11-19`)
-- `category` (e.g., `Dining Out`, `Subscriptions`)
-- `account_id` (string)
-- `is_waste` (boolean)
-
-**Response (200 OK):**
-```json
-{
-  "total": 142,
-  "page": 1,
-  "page_size": 20,
-  "data": [
-    {
-      "id": "tx_981247",
-      "account_id": "acc_chase_main",
-      "date": "2026-11-18",
-      "description": "DOORDASH*SUSHI",
-      "amount": 42.50,
-      "category": "Dining Out",
-      "is_waste": true,
-      "notes": "Late night order"
-    }
-  ]
-}
-```
-
-### `POST /transactions/upload`
-Uploads a CSV/TSV bank statement file for auto-parsing and categorization.
-
-**Body:** `multipart/form-data` with key `file` (CSV/TSV).
-
----
-
-## 4. Analytics & Optimization (`/analytics`)
-
-### `GET /analytics/summary`
-Returns spending total, category percentages, waste breakdown, and savings roadmap.
-
-**Response (200 OK):**
-```json
-{
-  "period": "2026-11-01_to_2026-11-19",
-  "total_spent": 3420.15,
-  "total_income": 6500.00,
-  "waste_total": 510.40,
-  "annual_waste_projection": 6124.80,
-  "potential_investment_value_10yr": 88240.12,
-  "categories": [
-    {
-      "name": "Dining Out",
-      "amount": 380.20,
-      "percentage": 11.1,
-      "is_waste": true
-    }
-  ]
-}
-```
-
+| Code | Meaning |
+|---|---|
+| 200 | OK |
+| 400 | Missing file / fields |
+| 401 | Missing or wrong credentials |
+| 500 | Parsing or database failure |

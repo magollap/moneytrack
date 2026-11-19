@@ -1,72 +1,94 @@
 # MoneyTrack 💰
 
-**MoneyTrack** is a lightweight, cross-platform personal finance manager and waste optimizer designed to run seamlessly on legacy hardware (e.g., Raspberry Pi, small VMs) as well as Windows, macOS, and Linux.
+**MoneyTrack** is a lightweight, local-first personal finance manager and waste
+optimizer. It runs on a Raspberry Pi, a small VM, or your laptop — Windows,
+macOS, and Linux — with no mandatory cloud services.
 
 ---
 
-## 🌟 Key Features
+## 🌟 Features
 
-- 📁 **CSV/TSV Auto-Parsing:** Easily upload bank and credit card statements.
-- 🚨 **Leakage & Waste Detection:** Automatically flags high-risk categories like excessive dining out, unused subscriptions, and bank fees.
-- 🎨 **Modern OLED Dark Theme:** Beautiful, eye-friendly, responsive interface built with React, Vite, and Tailwind CSS.
-- ⚡ **Lightweight & Fast:** Runs effortlessly on minimal system resources.
-- 🔒 **Local-First & Private:** Your financial data stays entirely on your device.
-- 🐘 **Database Flexibility:** Starts with SQLite out of the box; easily configurable to connect to PostgreSQL for handling years of historical data.
+- 📁 **CSV/TSV import** — drag & drop a bank or card statement.
+- 🧠 **Auto-categorisation** — Dining Out, Subscriptions, Fees, Groceries, Transport, Utilities, Housing.
+- 🚨 **Waste detection** — flags leaky spend and projects the annual cost plus 10-year opportunity cost of investing it.
+- 📊 **Analytics dashboard** — totals, category chart, detailed breakdown.
+- 🔐 **Self-registration login** — first account created becomes the admin.
+- 🧪 **Demo mode** — one click loads 90 days of realistic sample transactions.
+- 🎨 **OLED dark theme** — React + Vite + Tailwind, responsive for a future mobile build.
+- 🐘 **SQLite by default, PostgreSQL when you need scale.**
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+ recommended)
-- `npm` or `pnpm`
+Requirements: **Node.js 20+**.
 
-### Installation
+```bash
+git clone git@github.com:magollap/moneytrack.git
+cd moneytrack
+npm install
+npm run db:push     # create the SQLite schema
+npm run db:seed     # demo user + 90 days of data
+npm run build
+npm run server      # http://localhost:4000
+```
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/magollap/moneytrack.git
-   cd moneytrack
-   ```
+**Demo login:** `demo` / `demo123` (admin).
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+### Development
 
-3. **Set up the database:**
-   ```bash
-   npx prisma db push
-   ```
+```bash
+npm run server   # API on :4000
+npm run dev      # UI on :5173 (proxies /api)
+```
 
-4. **Start the development server:**
-   ```bash
-   npm run dev
-   ```
+### Auth model
 
-Open your browser and navigate to `http://localhost:5173`.
+Open the app, enter any new username + password to self-register. The **first
+user in an empty database becomes admin**. Existing usernames require the
+matching password.
 
 ---
 
 ## 📚 Documentation
 
-Detailed documentation is available in the [`docs/`](./docs) directory:
-
-- 🏗️ [**Architecture Overview**](./docs/ARCHITECTURE.md) – Tech stack, database schema, and design decisions.
-- 🔌 [**API Documentation**](./docs/API.md) – REST endpoint specifications for integration and extension.
-- 📦 [**Installation Guide**](./docs/INSTALL.md) – Step-by-step instructions for local, Docker, and cross-platform deployment.
+- 🏗️ [Architecture](./docs/ARCHITECTURE.md) — data model, request lifecycle, deployment, hardening.
+- 🔌 [API reference](./docs/API.md) — endpoints, payloads, status codes.
+- 📦 [Installation](./docs/INSTALL.md) — Windows/macOS/Linux, start/stop/status, PostgreSQL, Raspberry Pi.
+- 🎨 [Design system](./design-system/moneytrack/MASTER.md) — tokens and rules.
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Tech stack
 
-- **Frontend:** React, Vite, Tailwind CSS, Lucide Icons, Recharts
-- **Database / ORM:** Prisma ORM with SQLite (default) or PostgreSQL
-- **Design System:** Generated via `ui-ux-pro-max` (OLED Dark Mode)
+| Area | Choice |
+|---|---|
+| Frontend | React 19, Vite, Tailwind CSS v4, Recharts, lucide-react |
+| Backend | Node.js, Express 5, multer |
+| Data | Prisma 7, SQLite (libSQL adapter), optional PostgreSQL |
+| Design | `ui-ux-pro-max` generated OLED dark system |
+
+---
+
+## 📁 Layout
+
+```
+server.js              Express API + serves dist/
+src/
+  App.jsx              auth gate + dashboard shell
+  components/
+    AuthPage.jsx       register/login
+    TransactionUpload.jsx
+    AnalyticsSummary.jsx
+  lib/db.js            Prisma client (libSQL adapter)
+prisma/
+  schema.prisma        User, Account, Transaction, Budget
+scripts/seed.js        demo user + generated transactions
+docs/                  architecture, API, install
+```
 
 ---
 
 ## 📄 License
 
-[ISC License](./package.json)
-EOF
+ISC

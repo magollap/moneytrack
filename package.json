@@ -5,6 +5,10 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
+    "server": "node server.js",
+    "db:push": "prisma7 db push",
+    "db:studio": "prisma7 studio",
+    "db:seed": "node scripts/seed.js",
     "build": "vite build",
     "preview": "vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -14,11 +18,16 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@prisma/adapter-libsql": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "@tailwindcss/postcss": "^4.3.5",
     "@vitejs/plugin-react": "^6.3.0",
     "clsx": "^2.1.1",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
     "lucide-react": "^1.76.0",
+    "multer": "^2.5.0",
     "prisma": "^8.0.0-rc.34",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -29,8 +38,10 @@
     "vite": "^8.3.8"
   },
   "devDependencies": {
+    "@prisma/prisma7": "^7.10.1",
     "autoprefixer": "^10.7.0",
     "postcss": "^8.5.33",
-    "tailwindcss": "^4.3.5"
+    "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15"
   }
 }
