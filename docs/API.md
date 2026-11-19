@@ -63,8 +63,15 @@ Replaces the current user's transactions with 90 days of generated demo data.
 
 ### `POST /transactions/upload`
 
-Upload a CSV/TSV statement. Header row containing `date` is skipped. Each row:
-`date, description, amount` (comma or tab separated).
+Upload a bank or credit-card statement as **PDF, CSV or TSV**.
+
+- **PDF** — text is extracted with `pdf-parse`; dated lines with an amount are
+  imported. Summary lines (opening/closing balance, totals, minimum payment) and
+  credits/payments are skipped. Password-protected PDFs and image-only scans
+  cannot be read; exports as CSV instead.
+- **CSV/TSV** — rows are `date, description, amount`, separated by commas or
+  tabs. A header row containing `date` is skipped.
+- Maximum file size: 15 MB.
 
 **Headers:** `x-user-id`
 **Body:** `multipart/form-data`, field `file`
@@ -74,17 +81,35 @@ Upload a CSV/TSV statement. Header row containing `date` is skipped. Each row:
 {
   "success": true,
   "data": {
-    "period": "Last 90 days",
-    "total_spent": 1882.22,
-    "waste_total": 464.47,
-    "annual_waste_projection": 5573.64,
-    "potential_investment_value_10yr": 80392.7,
+    "period": "2026-10-03 → 2026-10-31",
+    "total_spent": 847.35,
+    "waste_total": 104.82,
+    "annual_waste_projection": 1257.84,
+    "potential_investment_value_10yr": 18142.75,
+    "transaction_count": 18,
+    "avg_daily_spend": 29.22,
+    "waste_share": 12.4,
     "categories": [
-      { "name": "Groceries", "amount": 656, "percentage": 34.9, "is_waste": false }
-    ]
+      { "name": "Clothing", "amount": 219.89, "percentage": 26, "is_waste": false }
+    ],
+    "daily": [{ "date": "2026-10-03", "amount": 86.42, "waste": 0 }],
+    "top_waste": [{ "description": "DOORDASH*SUSHI PALACE", "amount": 38.75 }],
+    "import": {
+      "source": "pdf",
+      "pages": 2,
+      "transactions": 18,
+      "file": "sample-bank-statement.pdf"
+    }
   }
 }
 ```
+
+`import.source` is `pdf` or `text`. `import.pages` is `null` for CSV/TSV.
+
+**Errors**
+- `422` — no selectable text (scanned PDF), no transactions detected, or an
+  encrypted PDF.
+- `400` — missing file.
 
 ### `GET /transactions`
 
@@ -153,14 +178,244 @@ monthly compounding.
 
 ---
 
-## 5. System
+## 5. Plan & budget
+
+Budgets are stored once per category with `month = "default"` (the standing
+plan) plus optional per-month overrides. The default plan is created on first
+read and includes: Housing, Groceries, Utilities, Transport, Health & Fitness,
+Dining Out, Subscriptions, Fees, Clothing, Entertainment, Miscellaneous, and a
+Savings goal.
+
+### `GET /budgets?month=YYYY-MM`
+
+Returns spending against limits for the requested month (current month by
+default). Status thresholds: `over` above 100%, `warn` at 80% or more, `ok`
+below 80%, `unset` when there is no limit.
+
+```json
+{
+  "success": true,
+  "data": {
+    "month": "2026-11",
+    "label": "November 2026",
+    "total": {
+      "budget": 2805,
+      "spent": 184.59,
+      "remaining": 2620.41,
+      "percentage": 6.6,
+      "status": "ok"
+    },
+    "savings_goal": { "target": 400, "spent": 0 },
+    "categories": [
+      {
+        "id": "…",
+        "category": "Groceries",
+        "limit": 450,
+        "spent": 115.57,
+        "remaining": 334.43,
+        "percentage": 25.7,
+        "status": "ok",
+        "kind": "essential",
+        "note": "Food at home",
+        "isWaste": false,
+        "source": "plan"
+      }
+    ],
+    "unbudgeted": [{ "category": "Pet care", "spent": 40 }],
+    "alerts": []
+  }
+}
+```
+
+`kind` is one of `essential`, `leak`, `lifestyle`, `goal`, or `lifestyle` for
+custom categories. `source` is `plan` or `override`.
+
+### `POST /budgets`
+
+Create or update a per-category limit.
+
+```json
+{
+  "category": "Groceries",
+  "amount": 500,
+  "month": "default",
+  "view_month": "2026-11"
+}
+```
+
+- Omit `month` (or use `default`) to change the standing plan.
+- Use `month: "YYYY-MM"` for a one-month override.
+- `view_month` selects the month returned in the response (defaults to the
+  current month).
+
+**Response 200:** the full budget state (same shape as `GET /budgets`).
+
+### `DELETE /budgets/:id?month=YYYY-MM`
+
+Deletes a limit and returns the updated budget state for `month`.
+
+### `POST /budgets/generate`
+
+Rebuilds the standing plan from the previous three months of spending:
+average per category × 1.05, rounded to $5 (Savings derives from 15% of average
+monthly spend). Existing plan rows are updated.
+
+**Body:** `{ "month": "2026-11" }` (optional, view month for the response)
+
+```json
+{
+  "success": true,
+  "data": {
+    "month": "2026-11",
+    "label": "November 2026",
+    "generated_from": ["2026-08", "2026-09", "2026-10"],
+    "suggestions": [
+      { "category": "Groceries", "amount": 455, "kind": "essential", "basis": "average spend + 5%" }
+    ]
+  }
+}
+```
+
+The response also includes `total`, `savings_goal`, `categories`,
+`unbudgeted`, and `alerts`.
+
+---
+
+## 6. Reports
+
+### `GET /reports?month=YYYY-MM`
+
+Monthly report with six-month history, category movement, merchant ranking and
+budget outcome.
+
+```json
+{
+  "success": true,
+  "data": {
+    "month": "2026-11",
+    "label": "November 2026",
+    "previous_month": "2026-10",
+    "totals": {
+      "spent": 184.59,
+      "waste": 93.4,
+      "count": 7,
+      "previous_spent": 586.81,
+      "change": -402.22,
+      "change_pct": -68.5,
+      "avg_per_day": 9.72,
+      "days": 19
+    },
+    "budgets": { "total": { }, "categories": [] },
+    "categories": [
+      {
+        "name": "Utilities",
+        "amount": 78.03,
+        "count": 1,
+        "previous": 0,
+        "change": 78.03,
+        "change_pct": null,
+        "share": 42.3,
+        "isWaste": false,
+        "budget": { "limit": 180, "status": "ok", "percentage": 43.4 }
+      }
+    ],
+    "top_merchants": [
+      {
+        "description": "COMCAST INTERNET",
+        "amount": 79.99,
+        "count": 1,
+        "category": "Utilities",
+        "isWaste": false
+      }
+    ],
+    "monthly": [
+      { "month": "2026-06", "spent": 400.12, "waste": 90.2, "count": 12 }
+    ],
+    "daily": [{ "date": "2026-11-01", "amount": 12.5, "waste": 0 }],
+    "insights": ["Utilities was the largest category at $78.03 (42.3% of spend)."]
+  }
+}
+```
+
+`previous` and `change` compare against the previous calendar month.
+`change_pct` is `null` when the previous amount is zero. `avg_per_day` uses
+days elapsed for the current month, or the full month otherwise.
+
+---
+
+## 7. AI skills
+
+### `GET /ai/status?refresh=true`
+
+Reports which local answer engine is available. Detection is cached for 20
+seconds unless `refresh=true`.
+
+```json
+{
+  "success": true,
+  "data": {
+    "ollama": {
+      "available": true,
+      "model": "qwen3.5:4b",
+      "models": ["qwen3.5:4b"],
+      "url": "http://localhost:11434"
+    },
+    "python": {
+      "available": true,
+      "command": "python3",
+      "skill": "skills/spend_skill.py"
+    },
+    "preferred": "ollama"
+  }
+}
+```
+
+`preferred` is `ollama`, `python-skill` or `local-js`.
+
+### `POST /ai/ask`
+
+Answers a natural-language question over the user's own transactions and
+budgets. Priority: Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`) → local Python skill →
+built-in JavaScript rules. Nothing leaves the machine.
+
+**Body**
+```json
+{ "question": "How much did I spend on groceries last month?", "month": "2026-11" }
+```
+
+`question` is required and limited to 500 characters. `month` sets the budget
+context and defaults to the current month.
+
+**Response 200**
+```json
+{
+  "success": true,
+  "data": {
+    "question": "How much did I spend on groceries last month?",
+    "answer": "You spent $115.57 on Groceries in last month across 2 transactions.",
+    "engine": "python-skill",
+    "model": null,
+    "intent": "total",
+    "latency_ms": 910,
+    "engine_status": { "ollama": { }, "python": { }, "preferred": "python-skill" }
+  }
+}
+```
+
+`engine` is `ollama`, `python-skill` or `local-js`. `intent` is present for
+non-Ollama engines (`total`, `budget`, `waste`, `merchants`, `count`,
+`compare`). Ollama answers can take ~30 seconds on a small local model.
+
+---
+
+## 8. System
 
 ### `GET /system/status`
 
 ```json
 {
   "status": "online",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "db_type": "sqlite",
   "platform": "linux",
   "uptime_seconds": 16,
@@ -177,6 +432,7 @@ monthly compounding.
 | Code | Meaning |
 |---|---|
 | 200 | OK |
-| 400 | Missing file / fields |
+| 400 | Missing file / fields, invalid question or amount |
 | 401 | Missing or wrong credentials |
+| 422 | Statement could not be parsed (scanned/encrypted PDF, no rows) |
 | 500 | Parsing or database failure |

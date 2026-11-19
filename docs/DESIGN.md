@@ -76,9 +76,9 @@ than a glow, except the accent CTA which gets a subtle green halo.
 ```
 
 - **≥1024px** — fixed sidebar, content offset by 248px.
-- **<1024px** — sidebar disappears; a 4-item bottom navigation (56px tall,
-  `env(safe-area-inset-bottom)`) takes over. Exactly four destinations, so it
-  stays within the five-item mobile limit.
+- **<1024px** — sidebar disappears; a five-slot bottom navigation (56px tall,
+  `env(safe-area-inset-bottom)`) takes over: Overview, Transactions, Budget, AI,
+  More. “More” opens a sheet with Reports, Import, Settings and sign out.
 - **<640px** — KPI grid collapses to two columns, tables become stacked cards,
   filters wrap, charts keep a 256px height.
 
@@ -91,9 +91,12 @@ Breakpoints tested: 375, 768, 1024, 1440.
 | Screen | Job | Key components |
 |---|---|---|
 | Auth | Register or sign in, explain the product | Split brand panel + form, password reveal, demo shortcut |
-| Overview | Answer "where did my money go?" | 4 KPIs, daily area chart, category donut, top waste bars, recent list |
+| Overview | Answer "where did my money go?" | 4 KPIs, daily area chart, category donut, budget health, recent list |
 | Transactions | Audit and export | Search, category select, waste toggle, responsive table/cards, CSV export |
-| Import | Get data in | Dropzone, sample CSV, parsing explainer, result panel |
+| Plan & Budget | Enforce fixed limits | Month stepper, usage ring, green/amber/red category cards, alerts, smart plan |
+| Reports | Explain the month | Totals vs last month, six-month bars, category table, merchant ranking, insights |
+| AI Skills | Answer questions in words | Chat transcript, suggestions, engine badges (Ollama/Python/rules) |
+| Import | Get data in | PDF/CSV/TSV dropzone, sample file, parsing explainer, import result |
 | Settings | Trust and control | Account, runtime status, backup/Postgres notes, demo reset, sign out |
 
 ### Navigation behaviour
@@ -125,6 +128,8 @@ Breakpoints tested: 375, 768, 1024, 1440.
 | How is spend trending? | Area chart, single series | Rhythm over 90 days; gradient fill keeps it quiet |
 | What share per category? | Donut + legend list | Part-to-whole with ≤8 categories |
 | Which merchants leak most? | Horizontal bars | Ranking, sorted, labelled with amounts |
+| How does this month compare? | Six-month bar chart | Selected month in accent, history in slate |
+| Am I within plan? | Usage ring + category bars | Red/amber/green status is paired with a text label |
 | Headline numbers | KPI cards | Four max per row; each has a unit or comparison line |
 
 Tooltips repeat the category name and value; axes are formatted compactly

@@ -1,7 +1,8 @@
 # MoneyTrack Architecture
 
-MoneyTrack is a local-first personal finance manager: it ingests bank statements
-(CSV/TSV), classifies spending, flags "waste", and visualizes where money leaks.
+MoneyTrack is a local-first personal finance manager: it ingests bank and
+credit-card statements (PDF/CSV/TSV), classifies spending, enforces a fixed
+monthly budget plan, flags "waste", and explains the numbers through local AI.
 
 The same codebase runs on a Raspberry Pi, a small VM, or a laptop on Windows,
 macOS, and Linux.
@@ -35,7 +36,9 @@ in production. In development Vite (:5173) proxies `/api` to :4000.
 | Charts | Recharts | SVG charts, works on low-power devices |
 | Icons | lucide-react | Tree-shaken SVG icons |
 | API | Express 5 | Tiny, no framework overhead |
-| Uploads | multer (memory storage) | Statements are small; nothing written to disk |
+| Uploads | multer (memory) + pdf-parse | Statements stay in memory; pure-JS PDF text extraction |
+| Budgets | `server/lib/plan.js` | Fixed limits, per-month overrides, smart plan |
+| AI | Ollama → Python skill → JS rules | Local-first answers with graceful degradation |
 | ORM | Prisma 7 | One schema for SQLite and PostgreSQL |
 | DB driver | libSQL adapter | Escape hatch to Turso/remote SQLite later |
 | DB (default) | SQLite | Zero-admin, file-based, ideal for Pi/VM |
@@ -52,7 +55,8 @@ in production. In development Vite (:5173) proxies `/api` to :4000.
 - **Account** — bank/credit accounts owned by a user (reserved for multi-account
   imports; statement upload currently writes transactions without an account).
 - **Transaction** — `date`, `description`, `amount`, `category`, `isWaste`.
-- **Budget** — per-category monthly limit (`YYYY-MM`).
+- **Budget** — per-category monthly limit. Rows with `month = "default"` form
+  the standing plan; a `YYYY-MM` row overrides it for one month.
 
 Indexes worth adding as data grows: `Transaction(userId, date)` and
 `Transaction(userId, category)`.
@@ -64,14 +68,27 @@ Indexes worth adding as data grows: `Transaction(userId, date)` and
    - If the database has zero users, the new account gets `isAdmin: true`.
    - If the username exists, the password must match.
 2. **Upload** — `POST /api/v1/transactions/upload` (multipart `file`).
-   - The CSV/TSV is parsed in memory, one row per line, `date, description, amount`.
+   - CSV/TSV is split on commas/tabs; PDF text is extracted with `pdf-parse`.
+   - Dated rows with an amount are imported; balances, totals and credits are
+     skipped. Scanned PDFs return `422` with CSV guidance.
    - Keyword rules map descriptions to categories and mark leaky spend
      (`Dining Out`, `Subscriptions`, `Fees`).
-   - Rows are inserted with `createMany`, then a summary is returned.
+   - Rows are inserted with `createMany`, then a summary plus `import` metadata
+     (source, pages, row count) is returned.
 3. **Analytics** — `GET /api/v1/analytics/summary` aggregates all transactions
    into totals, category shares, an annualized waste projection, and a
    10-year invested-value estimate (7% APY, monthly compounding).
-4. **Demo** — `POST /api/v1/demo/load` replaces the user's transactions with
+4. **Budgets** — `GET /api/v1/budgets?month=YYYY-MM` joins the standing plan
+   and overrides with that month's spend and assigns `ok`/`warn`/`over` status.
+   `POST /budgets` edits a limit; `POST /budgets/generate` derives a plan from
+   the previous three months.
+5. **Reports** — `GET /api/v1/reports?month=YYYY-MM` compares the month with
+   the previous one, ranks merchants, lists six-month history and writes plain
+   language insights.
+6. **AI** — `POST /api/v1/ai/ask` builds a compact JSON context (totals,
+   budgets, merchants, history) and tries Ollama, then
+   `skills/spend_skill.py`, then built-in JS rules.
+7. **Demo** — `POST /api/v1/demo/load` replaces the user's transactions with
    90 days of generated data for instant exploration.
 
 ## 4b. Frontend structure
@@ -80,24 +97,34 @@ Indexes worth adding as data grows: `Transaction(userId, date)` and
 src/
   App.jsx                 auth gate, hash router, data loading
   components/
-    AppShell.jsx          sidebar (≥1024px) + bottom nav (<1024px)
+    AppShell.jsx          sidebar (≥1024px) + 5-slot bottom nav + More sheet
     AuthPage.jsx          register/login split screen
     ui.jsx                Card, Button, Badge, Spinner, EmptyState, ErrorNote
-    charts.jsx            area trend + category donut (Recharts)
+    charts.jsx            area trend, category donut, monthly bars (Recharts)
   pages/
-    Overview.jsx          KPI strip, trend, donut, waste ranking, recent list
+    Overview.jsx          KPIs, trend, donut, budget health, recent list
     Transactions.jsx      search / category / waste filters, CSV export
-    Import.jsx            dropzone, demo loader, parsing explainer
+    Budgets.jsx           month stepper, ring, limits, alerts, smart plan
+    Reports.jsx           totals, 6-month bars, category movement, merchants
+    AiSkills.jsx          chat, suggestions, engine status
+    Import.jsx            PDF/CSV dropzone, demo loader, parsing explainer
     Settings.jsx          account, runtime status, data controls
   lib/
     api.js                fetch wrapper, adds x-user-id
     format.js             currency, dates, category colours
+server/
+  lib/demo.js             categorisation, summaries, demo generator
+  lib/statement.js        CSV/TSV/PDF parsing
+  lib/plan.js             budget plan, overrides, smart generation
+  lib/reports.js          monthly report builder
+  lib/ai.js               Ollama → Python → JS answer cascade
+skills/spend_skill.py     deterministic offline Q&A skill
 ```
 
-Routing is `location.hash` (`#overview`, `#transactions`, `#import`,
-`#settings`) so the back button and deep links work without a router
-dependency. All server state is fetched in `App.jsx` and passed down; views are
-pure renderers, which keeps a future React Native client easy to align.
+Routing is `location.hash` (`#overview`, `#transactions`, `#budgets`,
+`#reports`, `#ai`, `#import`, `#settings`) so the back button and deep links
+work without a router dependency. Shared server state is fetched in `App.jsx`;
+budget/report/AI pages load their own month-scoped data.
 
 Visual rules, tokens, breakpoints and accessibility checks live in
 [`DESIGN.md`](./DESIGN.md).
@@ -114,8 +141,18 @@ Waste drives three derived metrics: current waste total, `waste × 12`
 (annual projection), and the future value of investing that annual amount
 monthly for 10 years at 7% APY.
 
-These rules live in one place (`categorize()` in `server.js`) so they can be
-replaced by user-defined rules or an LLM classifier later.
+These rules live in one place (`categorize()` in `server/lib/demo.js`) so they
+can be replaced by user-defined rules or an LLM classifier later.
+
+## 5b. Budget model
+
+Twelve fixed categories ship by default: Housing, Groceries, Utilities,
+Transport, Health & Fitness, Dining Out, Subscriptions, Fees, Clothing,
+Entertainment, Miscellaneous, and Savings (a goal, excluded from spend totals).
+Each has a standing `default` limit. Category status is `over` above 100%,
+`warn` at ≥80%, otherwise `ok`; the UI mirrors this as red/amber/green. The
+smart plan recomputes limits from the previous three months (average × 1.05,
+rounded to $5).
 
 ## 6. Deployment & portability
 
@@ -127,6 +164,8 @@ replaced by user-defined rules or an LLM classifier later.
 | Frontend delivery | `npm run build` → served by Express from `dist/` |
 | Dev | Vite :5173 with `/api` proxy → :4000 |
 | API port | `PORT` env var, default 4000 |
+| AI (optional) | Ollama on `OLLAMA_URL` (default `http://localhost:11434`) |
+| AI fallback | Python 3 + `skills/spend_skill.py`, then built-in JS rules |
 
 SQLite file: `prisma/dev.db` (git-ignored). Back it up by copying that file.
 

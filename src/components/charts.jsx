@@ -3,6 +3,9 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  Cell as BarCell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -88,8 +91,7 @@ export function SpendTrendChart({ daily = [] }) {
   )
 }
 
-export function CategoryDonut({ categories = [], total = 0 }) {
-  if (!categories.length) {
+export function CategoryDonut({ categories = [], total = 0 }) {  if (!categories.length) {
     return <p className="px-5 pb-8 text-xs text-muted">Upload a statement to see the breakdown.</p>
   }
 
@@ -141,6 +143,44 @@ export function CategoryDonut({ categories = [], total = 0 }) {
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+const monthShort = (month) =>
+  new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })
+
+export function MonthlyBars({ monthly = [], selected }) {
+  if (!monthly.length) {
+    return <p className="px-5 pb-8 text-xs text-muted">No monthly history yet.</p>
+  }
+
+  const data = monthly.map((m) => ({ ...m, label: monthShort(m.month) }))
+
+  return (
+    <div className="h-56 w-full px-1 pb-2" role="img" aria-label="Spending over the last six months">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="label" tick={axisStyle} tickLine={false} axisLine={false} />
+          <YAxis
+            tick={axisStyle}
+            tickLine={false}
+            axisLine={false}
+            width={52}
+            tickFormatter={(v) => compactCurrency(v)}
+          />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: '#1e293b55' }} />
+          <Bar dataKey="spent" name="Spent" radius={[5, 5, 0, 0]}>
+            {data.map((entry) => (
+              <BarCell
+                key={entry.month}
+                fill={entry.month === selected ? '#22c55e' : '#334155'}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   )
 }

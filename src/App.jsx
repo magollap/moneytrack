@@ -3,11 +3,14 @@ import AuthPage from './components/AuthPage'
 import AppShell from './components/AppShell'
 import Overview from './pages/Overview'
 import Transactions from './pages/Transactions'
+import Budgets from './pages/Budgets'
+import Reports from './pages/Reports'
+import AiSkills from './pages/AiSkills'
 import Import from './pages/Import'
 import Settings from './pages/Settings'
-import { getSummary, getTransactions, getStatus } from './lib/api'
+import { getSummary, getTransactions, getStatus, getBudgets } from './lib/api'
 
-const VIEWS = ['overview', 'transactions', 'import', 'settings']
+const VIEWS = ['overview', 'transactions', 'budgets', 'reports', 'ai', 'import', 'settings']
 
 function viewFromHash() {
   const hash = window.location.hash.replace('#', '')
@@ -19,6 +22,7 @@ export default function App() {
   const [view, setView] = useState(viewFromHash)
   const [summary, setSummary] = useState(null)
   const [transactions, setTransactions] = useState([])
+  const [budgets, setBudgets] = useState(null)
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -35,27 +39,26 @@ export default function App() {
     setView(next)
   }, [])
 
-  const loadData = useCallback(
-    async (currentUser, { silent = false } = {}) => {
-      if (!currentUser) return
-      silent ? setRefreshing(true) : setLoading(true)
-      setError(null)
+  const loadData = useCallback(async (currentUser, { silent = false } = {}) => {
+    if (!currentUser) return
+    silent ? setRefreshing(true) : setLoading(true)
+    setError(null)
 
-      const [summaryRes, txRes, statusRes] = await Promise.allSettled([
-        getSummary(currentUser),
-        getTransactions(currentUser),
-        getStatus(currentUser),
-      ])
+    const [summaryRes, txRes, statusRes, budgetRes] = await Promise.allSettled([
+      getSummary(currentUser),
+      getTransactions(currentUser),
+      getStatus(currentUser),
+      getBudgets(currentUser),
+    ])
 
-      if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value)
-      if (txRes.status === 'fulfilled') setTransactions(txRes.value)
-      if (statusRes.status === 'fulfilled') setStatus(statusRes.value)
+    if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value)
+    if (txRes.status === 'fulfilled') setTransactions(txRes.value)
+    if (statusRes.status === 'fulfilled') setStatus(statusRes.value)
+    if (budgetRes.status === 'fulfilled') setBudgets(budgetRes.value)
 
-      if (summaryRes.status === 'rejected') setError(summaryRes.reason.message)
-      silent ? setRefreshing(false) : setLoading(false)
-    },
-    []
-  )
+    if (summaryRes.status === 'rejected') setError(summaryRes.reason.message)
+    silent ? setRefreshing(false) : setLoading(false)
+  }, [])
 
   useEffect(() => {
     if (user) loadData(user)
@@ -70,6 +73,7 @@ export default function App() {
     setUser(null)
     setSummary(null)
     setTransactions([])
+    setBudgets(null)
     setStatus(null)
     window.location.hash = ''
   }
@@ -77,6 +81,10 @@ export default function App() {
   const handleImported = useCallback(async () => {
     await loadData(user, { silent: true })
   }, [user, loadData])
+
+  const handleBudgetsChanged = useCallback((next) => {
+    setBudgets(next)
+  }, [])
 
   const period = useMemo(() => {
     if (!summary?.period) return null
@@ -98,6 +106,7 @@ export default function App() {
         <Overview
           user={user}
           summary={summary}
+          budgets={budgets}
           transactions={transactions}
           loading={loading}
           refreshing={refreshing}
@@ -114,6 +123,14 @@ export default function App() {
           onRefresh={() => loadData(user, { silent: true })}
         />
       )}
+
+      {view === 'budgets' && (
+        <Budgets user={user} onChanged={handleBudgetsChanged} />
+      )}
+
+      {view === 'reports' && <Reports user={user} />}
+
+      {view === 'ai' && <AiSkills user={user} />}
 
       {view === 'import' && (
         <Import user={user} onImported={handleImported} onNavigate={navigate} />

@@ -1,7 +1,8 @@
 # Installation
 
 MoneyTrack runs on Windows, macOS, and Linux, including Raspberry Pi and small
-VMs. Requirements: **Node.js 20+** and npm. No Docker is required.
+VMs. Requirements: **Node.js 20+** and npm. No Docker is required. Python 3 and
+Ollama are optional and only improve AI answers.
 
 ---
 
@@ -49,6 +50,36 @@ npm run dev         # terminal 2 → http://localhost:5173
 Demo credentials: **demo / demo123**. Any new username self-registers; the
 first user in an empty database becomes admin.
 
+### Statement import
+
+Import accepts **PDF, CSV and TSV** on the Import screen or
+`POST /api/v1/transactions/upload`. Text-based PDFs (bank or credit-card
+statements) are parsed locally with `pdf-parse`. Scanned/image-only PDFs and
+password-protected PDFs are rejected with a CSV-export hint — no OCR is run.
+
+Generate a two-page sample statement to try it:
+
+```bash
+npm run sample:pdf     # samples/sample-bank-statement.pdf
+```
+
+### Optional local AI
+
+AI answers always work offline. The engine order is:
+
+1. **Ollama** (best answers)
+   ```bash
+   ollama serve
+   ollama pull qwen3.5:4b
+   ```
+   Optional env: `OLLAMA_URL` (default `http://localhost:11434`),
+   `OLLAMA_MODEL` (defaults to the first installed model).
+2. **Python skill** (`skills/spend_skill.py`) — requires `python3`, no packages.
+3. **Built-in JS rules** — no dependency.
+
+`GET /api/v1/ai/status` reports what is available; the AI Skills page shows the
+active engine.
+
 ### Scripts
 
 | Command | Purpose |
@@ -59,6 +90,7 @@ first user in an empty database becomes admin.
 | `npm run db:push` | Sync schema to the SQLite file |
 | `npm run db:seed` | Insert demo user + transactions |
 | `npm run db:studio` | Browse the database |
+| `npm run sample:pdf` | Generate `samples/sample-bank-statement.pdf` |
 | `npm run app:start` / `app:stop` / `app:status` | Control script (macOS/Linux) |
 
 ---

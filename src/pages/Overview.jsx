@@ -8,6 +8,8 @@ import {
   Sparkles,
   Flame,
   ArrowRight,
+  PiggyBank,
+  AlertTriangle,
 } from 'lucide-react'
 import { Card, CardHeader, Badge, Button, EmptyState, ErrorNote, Spinner } from '../components/ui'
 import { SpendTrendChart, CategoryDonut } from '../components/charts'
@@ -37,7 +39,7 @@ function KpiCard({ label, value, sub, icon: Icon, tone = 'default', badge }) {
   )
 }
 
-export default function Overview({ user, summary, transactions, onNavigate, onRefresh, refreshing, loading, error }) {
+export default function Overview({ user, summary, budgets, transactions, onNavigate, onRefresh, refreshing, loading, error }) {
   if (loading && !summary) {
     return (
       <Card>
@@ -124,6 +126,81 @@ export default function Overview({ user, summary, transactions, onNavigate, onRe
           icon={TrendingUp}
         />
       </div>
+
+      {/* Budget health */}
+      {budgets && (
+        <Card>
+          <CardHeader
+            title="Budget health"
+            subtitle={`${budgets.label} · ${budgets.total.percentage}% of ${currency(budgets.total.budget)} used`}
+            icon={PiggyBank}
+            action={
+              <button
+                onClick={() => onNavigate('budgets')}
+                className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-accent"
+              >
+                Open plan <ArrowRight className="h-3 w-3" aria-hidden="true" />
+              </button>
+            }
+          />
+          <div className="space-y-3 px-5 pb-5">
+            {budgets.alerts.length > 0 ? (
+              <div
+                className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs ${
+                  budgets.total.status === 'over' || budgets.alerts.some((a) => a.status === 'over')
+                    ? 'border-danger/30 bg-danger/10 text-danger'
+                    : 'border-warn/30 bg-warn/10 text-warn'
+                }`}
+                role="status"
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  {budgets.alerts[0].status === 'over'
+                    ? `${budgets.alerts[0].category} is ${currency(Math.abs(budgets.alerts[0].remaining))} over budget.`
+                    : `${budgets.alerts[0].category} is at ${budgets.alerts[0].percentage}% of its limit.`}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-accent" role="status">
+                <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                All budgets are within plan this month.
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {budgets.categories
+                .filter((c) => c.kind !== 'goal')
+                .sort((a, b) => b.percentage - a.percentage)
+                .slice(0, 3)
+                .map((c) => (
+                  <div key={c.id}>
+                    <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                      <span className="truncate text-muted">{c.category}</span>
+                      <span
+                        className={`num ${
+                          c.status === 'over' ? 'text-danger' : c.status === 'warn' ? 'text-warn' : 'text-accent'
+                        }`}
+                      >
+                        {c.percentage}%
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+                      <div
+                        className={`h-full rounded-full ${
+                          c.status === 'over' ? 'bg-danger' : c.status === 'warn' ? 'bg-warn' : 'bg-accent'
+                        }`}
+                        style={{ width: `${Math.min(100, c.percentage)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-faint">
+                      {currency(c.spent)} of {currency(c.limit)}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-5">

@@ -8,6 +8,8 @@ import {
   ArrowRight,
   Download,
   CheckCircle2,
+  FileText,
+  ScanLine,
 } from 'lucide-react'
 import { Card, CardHeader, Button, ErrorNote, Badge } from '../components/ui'
 import { uploadStatement, loadDemo } from '../lib/api'
@@ -19,6 +21,11 @@ const SAMPLE = `Date,Description,Amount
 2026-11-03,NETFLIX.COM MONTHLY,15.99
 2026-11-04,SHELL GAS STATION,51.30
 2026-11-05,ELECTRIC UTILITY BILL,96.40`
+
+const SOURCE_LABEL = {
+  pdf: 'PDF statement',
+  text: 'CSV / TSV file',
+}
 
 export default function Import({ user, onImported, onNavigate }) {
   const [busy, setBusy] = useState(false)
@@ -53,7 +60,11 @@ export default function Import({ user, onImported, onNavigate }) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     multiple: false,
-    accept: { 'text/csv': ['.csv'], 'text/plain': ['.tsv', '.txt'] },
+    accept: {
+      'text/csv': ['.csv'],
+      'text/plain': ['.tsv', '.txt'],
+      'application/pdf': ['.pdf'],
+    },
   })
 
   const downloadSample = () => {
@@ -80,12 +91,15 @@ export default function Import({ user, onImported, onNavigate }) {
     }
   }
 
+  const source = result?.import?.source
+
   return (
     <div className="space-y-4 md:space-y-5">
       <div>
         <h2 className="text-xl font-semibold tracking-tight text-ink">Import a statement</h2>
         <p className="mt-1 text-xs text-muted">
-          CSV or TSV with a header row and three columns: <span className="text-ink">Date, Description, Amount</span>.
+          Bank or credit-card statements as <span className="text-ink">PDF</span>, CSV or TSV.
+          PDFs need selectable text — export CSV for scans or screenshots.
         </p>
       </div>
 
@@ -100,7 +114,7 @@ export default function Import({ user, onImported, onNavigate }) {
                   : 'border-line-strong bg-canvas/40 hover:border-accent/50'
               }`}
             >
-              <input {...getInputProps()} aria-label="Upload CSV or TSV statement" />
+              <input {...getInputProps()} aria-label="Upload PDF, CSV or TSV statement" />
               <span className="grid h-14 w-14 place-items-center rounded-2xl bg-surface-2 text-accent">
                 <UploadCloud className="h-7 w-7" aria-hidden="true" />
               </span>
@@ -108,7 +122,7 @@ export default function Import({ user, onImported, onNavigate }) {
                 <p className="text-sm font-semibold text-ink">
                   {busy ? 'Crunching numbers…' : isDragActive ? 'Drop it here' : 'Drop your statement here'}
                 </p>
-                <p className="mt-1 text-xs text-muted">or click to browse · .csv, .tsv, .txt</p>
+                <p className="mt-1 text-xs text-muted">or click to browse · .pdf, .csv, .tsv, .txt</p>
               </div>
               <div className="flex items-center gap-1.5 text-[11px] text-faint">
                 <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
@@ -143,18 +157,30 @@ export default function Import({ user, onImported, onNavigate }) {
           <ul className="space-y-3 px-5 pb-5 text-xs text-muted">
             <li className="flex gap-2">
               <span className="num text-accent">01</span>
-              Rows are split on commas or tabs; a header containing “date” is skipped.
+              <span>
+                <span className="text-ink">PDF</span> — text is extracted and dated rows with an amount
+                are detected. Cards lists and summaries are skipped.
+              </span>
             </li>
             <li className="flex gap-2">
               <span className="num text-accent">02</span>
-              Descriptions are categorised into Dining, Groceries, Transport, Utilities,
-              Subscriptions and Fees.
+              <span>
+                <span className="text-ink">CSV / TSV</span> — split on commas or tabs with a header
+                containing “date”.
+              </span>
             </li>
             <li className="flex gap-2">
               <span className="num text-accent">03</span>
-              Dining, subscriptions and fees are flagged as waste and projected forward.
+              Categories, waste flags and projections are applied to every row.
             </li>
           </ul>
+          <div className="mx-5 mb-5 flex items-start gap-2 rounded-xl border border-line bg-canvas/40 p-3">
+            <ScanLine className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" aria-hidden="true" />
+            <p className="text-[11px] leading-relaxed text-muted">
+              Scanned or image-only PDFs contain no text. Export CSV from your bank instead — no OCR
+              is run on your device.
+            </p>
+          </div>
         </Card>
       </div>
 
@@ -162,7 +188,11 @@ export default function Import({ user, onImported, onNavigate }) {
         <Card className="glow-accent">
           <CardHeader
             title="Import complete"
-            subtitle={`${result.transaction_count} transactions in this file`}
+            subtitle={
+              result.import
+                ? `${SOURCE_LABEL[source] || 'Statement'}${result.import.pages ? ` · ${result.import.pages} page${result.import.pages === 1 ? '' : 's'}` : ''} · ${result.import.transactions} transactions`
+                : `${result.transaction_count} transactions in this file`
+            }
             icon={CheckCircle2}
             action={<Badge tone="accent">Analysed</Badge>}
           />
@@ -184,6 +214,12 @@ export default function Import({ user, onImported, onNavigate }) {
               <p className="num mt-1 text-sm text-warn">{currency(result.annual_waste_projection)}</p>
             </div>
           </div>
+          {result.import && (
+            <div className="flex items-center gap-2 border-t border-line px-5 py-2.5 text-[11px] text-faint">
+              <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="truncate">{result.import.file}</span>
+            </div>
+          )}
         </Card>
       )}
 

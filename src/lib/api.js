@@ -36,6 +36,23 @@ export const getTransactions = (user) => apiFetch('/transactions', { user })
 export const loadDemo = (user) => apiFetch('/demo/load', { method: 'POST', user })
 export const getStatus = (user) => apiFetch('/system/status', { user })
 
+export const getBudgets = (user, month) =>
+  apiFetch(`/budgets${month ? `?month=${month}` : ''}`, { user })
+export const saveBudget = (user, { category, amount, month, view_month }) =>
+  apiFetch('/budgets', { user, method: 'POST', body: { category, amount, month, view_month } })
+export const deleteBudget = (user, id, month) =>
+  apiFetch(`/budgets/${id}${month ? `?month=${month}` : ''}`, { user, method: 'DELETE' })
+export const generatePlan = (user, month) =>
+  apiFetch('/budgets/generate', { user, method: 'POST', body: { month } })
+
+export const getReport = (user, month) =>
+  apiFetch(`/reports${month ? `?month=${month}` : ''}`, { user })
+
+export const getAiStatus = (user, refresh = false) =>
+  apiFetch(`/ai/status${refresh ? '?refresh=true' : ''}`, { user })
+export const askAi = (user, question, month) =>
+  apiFetch('/ai/ask', { user, method: 'POST', body: { question, month } })
+
 export async function uploadStatement(user, file) {
   const form = new FormData()
   form.append('file', file)
