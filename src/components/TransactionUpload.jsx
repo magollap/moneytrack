@@ -60,4 +60,3 @@ const TransactionUpload = ({ onUploadSuccess }) => {
 };
 
 export default TransactionUpload;
-EOF

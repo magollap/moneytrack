@@ -73,4 +73,3 @@ const AnalyticsSummary = ({ data }) => {
 };
 
 export default AnalyticsSummary;
-EOF
