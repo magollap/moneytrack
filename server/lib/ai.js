@@ -4,6 +4,7 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { directionOf, flowOf, isIncome, isSpending } from './classify.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SKILL_PATH = path.resolve(__dirname, '..', '..', 'skills', 'spend_skill.py')
@@ -133,6 +134,8 @@ export async function askAi({ question, context, rows, budgets }) {
       description: t.description,
       amount: Number(t.amount),
       category: t.category,
+      flow: flowOf(t),
+      direction: directionOf(t),
       is_waste: Boolean(t.isWaste),
     })),
     budgets: budgets.categories.map((b) => ({
@@ -219,6 +222,11 @@ const CATEGORY_WORDS = [
   ['Savings', /(savings?|save)/],
 ]
 
+const MONTH_INDEX = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+}
+
 function detectCategory(q) {
   for (const [name, re] of CATEGORY_WORDS) if (re.test(q)) return name
   return null
@@ -257,6 +265,24 @@ function periodFor(question, now = new Date(), from, to) {
     start.setDate(start.getDate() - 30)
     return { key: 'the last 30 days', from: start, to: now }
   }
+
+  const named = q.match(
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b(?:\s+(\d{4}))?/
+  )
+  if (named) {
+    const month = MONTH_INDEX[named[1].slice(0, 3)]
+    let year = named[2] ? Number(named[2]) : y
+    // Without an explicit year, use the most recent occurrence of that month.
+    if (!named[2] && month > m + 1) year -= 1
+    const start = new Date(Date.UTC(year, month - 1, 1))
+    const end = new Date(Date.UTC(year, month, 1))
+    return {
+      key: start.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+      from: start,
+      to: end,
+    }
+  }
+
   if (from && to) return { key: 'last month', from: new Date(from), to: new Date(to) }
   const start = new Date(Date.UTC(y, m, 1))
   return { key: 'this month', from: start, to: new Date(Date.UTC(y, m + 1, 1)) }
@@ -275,7 +301,9 @@ function localAnswer(question, rows, budgets, now = new Date()) {
   })
 
   const sum = (list) => list.reduce((a, t) => a + Math.abs(Number(t.amount) || 0), 0)
-  const scoped = category ? inPeriod.filter((t) => t.category === category) : inPeriod
+  const spendRows = inPeriod.filter((t) => isSpending(t))
+  const incomeRows = inPeriod.filter((t) => isIncome(t))
+  const scoped = category ? spendRows.filter((t) => t.category === category) : spendRows
   const total = sum(scoped)
 
   if (/(budget|limit|left|remaining|over)/.test(q)) {
@@ -304,11 +332,56 @@ function localAnswer(question, rows, budgets, now = new Date()) {
     }
   }
 
+  if (/(cash\s*flow|money in|money out|inflow|outflow|net\b)/.test(q)) {
+    const inTotal = sum(inPeriod.filter((t) => directionOf(t) === 'in'))
+    const outTotal = sum(inPeriod.filter((t) => directionOf(t) === 'out'))
+    const net = inTotal - outTotal
+    const salary = sum(incomeRows.filter((t) => t.category === 'Salary'))
+    const deposits = sum(incomeRows.filter((t) => t.category === 'Deposits'))
+    return {
+      intent: 'cashflow',
+      answer: `In ${period.key}, money in was ${money(inTotal)} (salary ${money(salary)}, deposits ${money(deposits)}) and money out was ${money(outTotal)}. Net cash flow: ${net >= 0 ? '+' : '-'}${money(Math.abs(net))}.`,
+    }
+  }
+
+  if (/(income|salary|paycheck|payroll|deposit|money in|earned|got paid)/.test(q)) {
+    const scopedIncome = category ? incomeRows.filter((t) => t.category === category) : incomeRows
+    const income = sum(scopedIncome)
+    if (!scopedIncome.length) {
+      return {
+        intent: 'income',
+        answer: `No income or deposits were recorded in ${period.key}${category ? ` for ${category}` : ''}.`,
+      }
+    }
+    const byCategory = new Map()
+    for (const t of scopedIncome) {
+      byCategory.set(t.category, (byCategory.get(t.category) || 0) + Math.abs(Number(t.amount) || 0))
+    }
+    const breakdown = [...byCategory.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amount]) => `${name} ${money(amount)}`)
+      .join(', ')
+    return {
+      intent: 'income',
+      answer: `Money in for ${period.key} was ${money(income)} across ${scopedIncome.length} transaction${scopedIncome.length === 1 ? '' : 's'} (${breakdown}).`,
+    }
+  }
+
+  if (/(credit card payment|card payment|paid.*card|card.*paid)/.test(q)) {
+    const cardRows = inPeriod.filter((t) => flowOf(t) === 'card_payment')
+    const cardOut = sum(cardRows.filter((t) => directionOf(t) === 'out'))
+    const cardIn = sum(cardRows.filter((t) => directionOf(t) === 'in'))
+    return {
+      intent: 'card_payment',
+      answer: `Card payments in ${period.key}: ${money(cardOut)} paid from bank accounts and ${money(cardIn)} received by cards across ${cardRows.length} transaction${cardRows.length === 1 ? '' : 's'}.`,
+    }
+  }
+
   if (/(waste|leak|wasting)/.test(q)) {
-    const waste = sum(inPeriod.filter((t) => t.isWaste))
+    const waste = sum(spendRows.filter((t) => t.isWaste))
     return {
       intent: 'waste',
-      answer: `Waste in ${period.key} was ${money(waste)} across ${inPeriod.filter((t) => t.isWaste).length} transactions.`,
+      answer: `Waste in ${period.key} was ${money(waste)} across ${spendRows.filter((t) => t.isWaste).length} transactions.`,
     }
   }
 
@@ -332,7 +405,7 @@ function localAnswer(question, rows, budgets, now = new Date()) {
   if (/(how many|count|number of)/.test(q)) {
     return {
       intent: 'count',
-      answer: `${scoped.length} transaction${scoped.length === 1 ? '' : 's'}${category ? ` for ${category}` : ''} in ${period.key}.`,
+      answer: `${scoped.length} spending transaction${scoped.length === 1 ? '' : 's'}${category ? ` for ${category}` : ''} in ${period.key}.`,
     }
   }
 
@@ -340,7 +413,12 @@ function localAnswer(question, rows, budgets, now = new Date()) {
     const prev = periodFor('last month', now)
     const prevRows = rows.filter((t) => {
       const d = new Date(t.date)
-      return d >= prev.from && d < prev.to && (!category || t.category === category)
+      return (
+        d >= prev.from &&
+        d < prev.to &&
+        isSpending(t) &&
+        (!category || t.category === category)
+      )
     })
     const prevTotal = sum(prevRows)
     if (!prevTotal) {

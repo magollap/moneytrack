@@ -45,6 +45,12 @@ Subscriptions `#a78bfa`, Transport `#38bdf8`, Utilities `#fbbf24`,
 Housing `#2dd4bf`, Fees `#f97316`, General `#94a3b8`. Every chart legend also
 prints the label and value, so colour is never the only signal.
 
+Money-flow colour semantics: `accent` for money in/income/positive net,
+`danger` for money out/waste/fees, `info` for credit-card payments, `warn` for
+transfers, and `neutral` for ordinary spending. Amounts always carry an
+explicit `+`/`−` sign and a text badge (Income, Card payment, Transfer, …), so
+direction is readable without colour.
+
 ### Typography
 
 - Headings and body: **Fira Sans** (300–700), base 16px, line-height 1.5.
@@ -66,19 +72,22 @@ than a glow, except the accent CTA which gets a subtle green halo.
 ┌────────────┬──────────────────────────────────────────────┐
 │ Sidebar    │ Sticky top bar: page title · period · status  │
 │ 248px      ├──────────────────────────────────────────────┤
-│ Overview   │ KPI · KPI · KPI · KPI                        │
+│ Overview   │ account cards · total balance                 │
+│ Accounts   │ KPI · KPI · KPI · KPI                        │
 │ Transactions│ ┌──────────── trend (3/5) ┬ donut (2/5) ───┐ │
 │ Import     │ └─────────────────────────┴─────────────────┘ │
 │ Settings   │ ┌──── top waste (2/5) ┬ recent (3/5) ────────┐ │
 │            │ └─────────────────────┴─────────────────────┘ │
-│ user card  │ max-width 1152px, 16–32px gutters            │
+│ account    │ max-width 1152px, 16–32px gutters            │
+│ switcher   │                                              │
 └────────────┴──────────────────────────────────────────────┘
 ```
 
 - **≥1024px** — fixed sidebar, content offset by 248px.
 - **<1024px** — sidebar disappears; a five-slot bottom navigation (56px tall,
   `env(safe-area-inset-bottom)`) takes over: Overview, Transactions, Budget, AI,
-  More. “More” opens a sheet with Reports, Import, Settings and sign out.
+  More. “More” opens a sheet with Accounts, Reports, Import, Settings and sign
+  out.
 - **<640px** — KPI grid collapses to two columns, tables become stacked cards,
   filters wrap, charts keep a 256px height.
 
@@ -91,18 +100,19 @@ Breakpoints tested: 375, 768, 1024, 1440.
 | Screen | Job | Key components |
 |---|---|---|
 | Auth | Register or sign in, explain the product | Split brand panel + form, password reveal, demo shortcut |
-| Overview | Answer "where did my money go?" | 4 KPIs, daily area chart, category donut, budget health, recent list |
-| Transactions | Audit and export | Search, category select, waste toggle, responsive table/cards, CSV export |
+| Overview | Answer "where did my money go?" | Account cards with total balance and scope selector, 4 KPIs, money in/out/net strip, daily area chart, category donut, budget health, recent list with account names |
+| Accounts | Keep every bank/card in one place | Add form (name, institution, type, last 4, opening balance), per-account derived balance, money in/out, transaction count, delete, switch scope |
+| Transactions | Audit, correct and export | Account scope, search, flow/category filters, waste toggle, manual add form, inline category/account selects, delete, In/Out/Net summary, responsive table/cards, CSV export |
 | Plan & Budget | Enforce fixed limits | Month stepper, usage ring, green/amber/red category cards, alerts, smart plan |
-| Reports | Explain the month | Totals vs last month, six-month bars, category table, merchant ranking, insights |
+| Reports | Explain the month | Spending vs last month, cash flow, six-month bars, category table, merchant ranking, insights |
 | AI Skills | Answer questions in words | Chat transcript, suggestions, engine badges (Ollama/Python/rules) |
-| Import | Get data in | PDF/CSV/TSV dropzone, sample file, parsing explainer, import result |
-| Settings | Trust and control | Account, runtime status, backup/Postgres notes, demo reset, sign out |
+| Import | Get data in | PDF/CSV/TSV dropzone, account selector or auto-detect, sample files, statement type, imported/duplicate counts, money in/out/net, grouped inflows/outflows, classified rows |
+| Settings | Trust and control | Account, runtime status, backup/Postgres notes, remove demo data, clear all transactions, sign out |
 
 ### Navigation behaviour
 
 - The active view is mirrored in `location.hash` (`#overview`,
-  `#transactions`, …), so the browser back button and deep links work.
+  `#accounts`, `#transactions`, …), so the browser back button and deep links work.
 - `aria-current="page"` marks the active destination on both navigations.
 - Sign out clears all cached summaries before returning to the auth screen.
 

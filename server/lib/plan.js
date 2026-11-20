@@ -1,5 +1,7 @@
 // Budget plan: fixed monthly limits per category, overrides and smart suggestions.
 
+import { isSpending } from './classify.js'
+
 export const PLAN_CATEGORIES = [
   { category: 'Housing', amount: 1200, kind: 'essential', note: 'Rent or mortgage' },
   { category: 'Groceries', amount: 450, kind: 'essential', note: 'Food at home' },
@@ -68,6 +70,7 @@ async function rowsForMonth(prisma, userId, month) {
 function spendByCategory(rows) {
   const map = {}
   for (const t of rows) {
+    if (!isSpending(t)) continue
     const amount = Math.abs(Number(t.amount) || 0)
     map[t.category] = (map[t.category] || 0) + amount
   }
@@ -193,6 +196,7 @@ export async function generatePlan(prisma, userId, month = monthKey()) {
   const totalsByCategory = {}
   let totalSpend = 0
   for (const t of allRows) {
+    if (!isSpending(t)) continue
     const amount = Math.abs(Number(t.amount) || 0)
     totalsByCategory[t.category] = (totalsByCategory[t.category] || 0) + amount
     totalSpend += amount

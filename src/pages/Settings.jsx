@@ -9,9 +9,11 @@ import {
   ShieldCheck,
   Clock,
   Cpu,
+  Trash2,
+  Sparkles,
 } from 'lucide-react'
 import { Card, CardHeader, Badge, Button, ErrorNote } from '../components/ui'
-import { loadDemo } from '../lib/api'
+import { loadDemo, clearDemo, clearAllTransactions } from '../lib/api'
 import { longDate } from '../lib/format'
 
 function Row({ label, value, mono = true }) {
@@ -47,6 +49,53 @@ export default function Settings({ user, status, onStatusRefresh, onLogout, onDa
       await loadDemo(user)
       await onDataChanged()
       setNotice('Demo dataset regenerated with 90 days of transactions.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeDemo = async () => {
+    if (
+      !window.confirm(
+        'Remove all demo data? Statements and transactions you uploaded or added are kept.'
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const result = await clearDemo(user)
+      await onDataChanged()
+      setNotice(
+        `Removed ${result.removed} demo transaction${result.removed === 1 ? '' : 's'}. Your own data is untouched.`
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearEverything = async () => {
+    if (
+      !window.confirm(
+        'Delete every transaction for this profile? Accounts are kept, but all uploaded, manual and demo transactions are removed.'
+      )
+    ) {
+      return
+    }
+    if (!window.confirm('This cannot be undone. Delete all transactions now?')) return
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const result = await clearAllTransactions(user)
+      await onDataChanged()
+      setNotice(`Deleted ${result.removed} transaction${result.removed === 1 ? '' : 's'}.`)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -136,14 +185,27 @@ export default function Settings({ user, status, onStatusRefresh, onLogout, onDa
 
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" size="sm" onClick={reloadDemo} loading={busy}>
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
               Regenerate demo data
             </Button>
-            <Button variant="danger" size="sm" onClick={onLogout}>
+            <Button variant="secondary" size="sm" onClick={removeDemo} loading={busy}>
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              Remove demo data
+            </Button>
+            <Button variant="danger" size="sm" onClick={clearEverything} loading={busy}>
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              Clear all transactions
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onLogout}>
               <LogOut className="h-4 w-4" aria-hidden="true" />
               Sign out
             </Button>
           </div>
+
+          <p className="text-[11px] leading-relaxed text-faint">
+            “Remove demo data” only deletes generated demo rows and the demo account. Statements you
+            imported and transactions you added manually are kept.
+          </p>
 
           {notice && (
             <p className="flex items-center gap-1.5 text-xs text-accent" role="status">

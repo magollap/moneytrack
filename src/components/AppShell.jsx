@@ -12,10 +12,15 @@ import {
   ShieldCheck,
   MoreHorizontal,
   X,
+  Landmark,
+  CreditCard,
+  Plus,
 } from 'lucide-react'
+import { currency } from '../lib/format'
 
 const NAV = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'accounts', label: 'Accounts', icon: Landmark },
   { id: 'transactions', label: 'Transactions', icon: ReceiptText },
   { id: 'budgets', label: 'Plan & Budget', icon: PiggyBank },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
@@ -42,10 +47,28 @@ function Brand({ compact = false }) {
   )
 }
 
-export default function AppShell({ user, view, onNavigate, onLogout, period, children }) {
+export default function AppShell({
+  user,
+  view,
+  onNavigate,
+  onLogout,
+  period,
+  accounts,
+  accountScope = 'all',
+  onSelectAccount,
+  children,
+}) {
   const [moreOpen, setMoreOpen] = useState(false)
   const active = NAV.find((n) => n.id === view)
-  const moreActive = ['reports', 'import', 'settings'].includes(view)
+  const moreActive = ['accounts', 'reports', 'import', 'settings'].includes(view)
+  const accountList = accounts?.accounts || []
+  const totals = accounts?.totals
+  const unassigned = accounts?.unassigned
+
+  const selectAccount = (id) => {
+    setMoreOpen(false)
+    if (onSelectAccount) onSelectAccount(id)
+  }
 
   useEffect(() => {
     if (!moreOpen) return
@@ -89,6 +112,76 @@ export default function AppShell({ user, view, onNavigate, onLogout, period, chi
               </button>
             )
           })}
+
+          <div className="mt-4 border-t border-line pt-3">
+            <div className="flex items-center justify-between px-3 pb-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">Accounts</p>
+              <button
+                onClick={() => onNavigate('accounts')}
+                className="inline-flex items-center gap-0.5 text-[10px] text-muted hover:text-accent"
+              >
+                <Plus className="h-3 w-3" aria-hidden="true" /> Manage
+              </button>
+            </div>
+
+            <button
+              onClick={() => selectAccount('all')}
+              aria-current={accountScope === 'all' ? 'true' : undefined}
+              className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-left text-xs transition-colors ${
+                accountScope === 'all'
+                  ? 'bg-accent/10 text-accent'
+                  : 'text-muted hover:bg-surface-2 hover:text-ink'
+              }`}
+            >
+              <span className="truncate">All accounts</span>
+              <span className="num shrink-0 text-[11px]">{currency(totals?.balance || 0)}</span>
+            </button>
+
+            {accountList.map((a) => {
+              const Icon = a.type === 'credit_card' ? CreditCard : Landmark
+              const isActive = accountScope === a.id
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => selectAccount(a.id)}
+                  aria-current={isActive ? 'true' : undefined}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs transition-colors ${
+                    isActive ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-surface-2 hover:text-ink'
+                  }`}
+                  title={`${a.institution}${a.last4 ? ` ••${a.last4}` : ''}`}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                  <span className="num shrink-0 text-[11px]">{currency(a.balance)}</span>
+                </button>
+              )
+            })}
+
+            {unassigned?.transaction_count > 0 && (
+              <button
+                onClick={() => selectAccount('unassigned')}
+                aria-current={accountScope === 'unassigned' ? 'true' : undefined}
+                className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-left text-xs transition-colors ${
+                  accountScope === 'unassigned'
+                    ? 'bg-warn/10 text-warn'
+                    : 'text-muted hover:bg-surface-2 hover:text-ink'
+                }`}
+              >
+                <span className="truncate">Unassigned</span>
+                <span className="num shrink-0 text-[11px]">{unassigned.transaction_count}</span>
+              </button>
+            )}
+
+            {accountList.length === 0 && (
+              <button
+                onClick={() => onNavigate('accounts')}
+                className="mx-2 mt-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-[11px] text-muted hover:border-accent/50 hover:text-accent"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                Add your first account
+              </button>
+            )}
+          </div>
         </nav>
 
         <div className="px-3 pb-4">
@@ -183,7 +276,7 @@ export default function AppShell({ user, view, onNavigate, onLogout, period, chi
               </button>
             </div>
             <ul className="px-2">
-              {NAV.filter((n) => ['reports', 'import', 'settings'].includes(n.id)).map(
+              {NAV.filter((n) => ['accounts', 'reports', 'import', 'settings'].includes(n.id)).map(
                 ({ id, label, icon: Icon }) => (
                   <li key={id}>
                     <button

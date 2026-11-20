@@ -30,8 +30,12 @@ Create the database and load demo data:
 
 ```bash
 npm run db:push     # creates prisma/dev.db
-npm run db:seed     # demo / demo123 (admin) + 90 days of transactions
+npm run db:seed     # optional: demo / demo123 (admin) + 90 days of transactions
 ```
+
+Demo rows live in a tagged “Demo account”. If you want a clean install, skip
+`db:seed`, or sign in and use **Settings → Remove demo data** — it removes only
+generated demo rows and keeps anything you uploaded or added yourself.
 
 Production mode (Express serves the built UI and the API on one port):
 
@@ -54,13 +58,27 @@ first user in an empty database becomes admin.
 
 Import accepts **PDF, CSV and TSV** on the Import screen or
 `POST /api/v1/transactions/upload`. Text-based PDFs (bank or credit-card
-statements) are parsed locally with `pdf-parse`. Scanned/image-only PDFs and
-password-protected PDFs are rejected with a CSV-export hint — no OCR is run.
+statements) are parsed locally with `pdf-parse`. The parser detects the
+statement type, reads debit/credit sections and CR/DR markers, and classifies
+each line as income, spending, fee, card payment, transfer or refund. Scanned/
+image-only PDFs and password-protected PDFs are rejected with a CSV-export hint
+— no OCR is run.
 
-Generate a two-page sample statement to try it:
+CSV/TSV columns may be `date, description, amount` or
+`date, description, debit, credit` / `..., type`, separated by commas or tabs.
+
+Choose the destination account on the Import screen, or leave auto-detect on.
+Re-uploading the same statement — or last month’s file plus this month’s —
+imports only the rows you do not already have and reports the duplicates it
+skipped. Accounts, manual entries and categories can all be managed from the
+sidebar; account balances are derived from opening balance + money in − money
+out.
+
+Generate one sample bank statement and one credit-card statement to try it:
 
 ```bash
 npm run sample:pdf     # samples/sample-bank-statement.pdf
+                       # samples/sample-credit-card-statement.pdf
 ```
 
 ### Optional local AI
@@ -87,10 +105,11 @@ active engine.
 | `npm run dev` | Vite dev server on :5173 (proxies `/api`) |
 | `npm run start` | Express API + built UI on :4000 |
 | `npm run build` | Production bundle into `dist/` |
-| `npm run db:push` | Sync schema to the SQLite file |
+| `npm test` | Statement parser regression tests (bank/card PDF and CSV variants) |
+| `npm run db:push` | Sync schema to the SQLite file and regenerate the Prisma client |
 | `npm run db:seed` | Insert demo user + transactions |
 | `npm run db:studio` | Browse the database |
-| `npm run sample:pdf` | Generate `samples/sample-bank-statement.pdf` |
+| `npm run sample:pdf` | Generate `samples/sample-bank-statement.pdf` and `samples/sample-credit-card-statement.pdf` |
 | `npm run app:start` / `app:stop` / `app:status` | Control script (macOS/Linux) |
 
 ---

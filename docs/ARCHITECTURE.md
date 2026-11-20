@@ -52,14 +52,21 @@ in production. In development Vite (:5173) proxies `/api` to :4000.
   No server-side session: the client stores the authenticated user and sends
   `x-user-id` on API calls. Suitable for a local-first single-household app;
   see §7 for hardening.
-- **Account** — bank/credit accounts owned by a user (reserved for multi-account
-  imports; statement upload currently writes transactions without an account).
-- **Transaction** — `date`, `description`, `amount`, `category`, `isWaste`.
+- **Account** — bank/credit/cash account owned by a user. Fields: `name`,
+  `type` (`checking` | `savings` | `credit_card` | `cash`), `institution`,
+  `last4`, `openingBalance`, `isDemo`. **Balance is derived**:
+  `openingBalance + money_in − money_out`, so imports, manual entries and
+  deletions always move it consistently.
+- **Transaction** — `date`, `description`, `amount` (always positive),
+  `accountId`, `category`, `flow` (`income` | `expense` | `fee` |
+  `card_payment` | `transfer` | `refund`), `direction` (`in` | `out`),
+  `statementType`, `source` (`upload` | `manual` | `demo`), `fingerprint`,
+  `isWaste`.
 - **Budget** — per-category monthly limit. Rows with `month = "default"` form
   the standing plan; a `YYYY-MM` row overrides it for one month.
 
-Indexes worth adding as data grows: `Transaction(userId, date)` and
-`Transaction(userId, category)`.
+Indexes: `Transaction(userId, accountId, date)` for account-scoped lists and
+`Transaction(userId, fingerprint)` for duplicate checks.
 
 ## 4. Request lifecycle
 
@@ -67,29 +74,49 @@ Indexes worth adding as data grows: `Transaction(userId, date)` and
    - If the username does not exist, the account is self-registered.
    - If the database has zero users, the new account gets `isAdmin: true`.
    - If the username exists, the password must match.
-2. **Upload** — `POST /api/v1/transactions/upload` (multipart `file`).
-   - CSV/TSV is split on commas/tabs; PDF text is extracted with `pdf-parse`.
-   - Dated rows with an amount are imported; balances, totals and credits are
+2. **Upload** — `POST /api/v1/transactions/upload` (multipart `file`,
+   optional `account_id`).
+   - CSV/TSV is split on commas/tabs with a quote-aware parser; PDF text is
+     extracted with `pdf-parse`.
+   - The statement type is detected (`bank`, `credit_card`, `statement`) from
+     document keywords, and debit/credit section headings establish direction.
+   - Dated rows with an amount are imported; balances and summary totals are
      skipped. Scanned PDFs return `422` with CSV guidance.
+   - `classifyMovement()` assigns `flow` and `direction`: salary/payroll →
+     income, deposits/interest → income, payments to a card → card_payment,
+     transfers → transfer, refunds → refund, fees → fee, everything else →
+     expense. Unmatched credits are kept as deposits (bank) or refunds (card).
    - Keyword rules map descriptions to categories and mark leaky spend
      (`Dining Out`, `Subscriptions`, `Fees`).
-   - Rows are inserted with `createMany`, then a summary plus `import` metadata
-     (source, pages, row count) is returned.
-3. **Analytics** — `GET /api/v1/analytics/summary` aggregates all transactions
-   into totals, category shares, an annualized waste projection, and a
-   10-year invested-value estimate (7% APY, monthly compounding).
+   - **Account resolution** (`server/lib/accounts.js`): a chosen `account_id`
+     wins; otherwise the importer matches an existing account by last4, then by
+     institution, else creates one from the statement header.
+   - **Deduplication**: each row is keyed by
+     `account + ISO date + amount + direction + normalised description`
+     (unassigned legacy rows key on `*`). Rows already in the database are
+     counted as duplicates and skipped; only new rows are inserted.
+   - The response returns `imported`/`duplicates` counts alongside the summary,
+     `flows`, the new rows and the refreshed account list.
+3. **Analytics** — `GET /api/v1/analytics/summary?account_id=…` aggregates the
+   selected scope (`all`, an account id or `unassigned`) into spending totals,
+   category shares, money in/out/net, an annualized waste projection, and a
+   10-year invested-value estimate (7% APY, monthly compounding). Spending
+   totals exclude income, refunds, transfers and card payments.
 4. **Budgets** — `GET /api/v1/budgets?month=YYYY-MM` joins the standing plan
    and overrides with that month's spend and assigns `ok`/`warn`/`over` status.
    `POST /budgets` edits a limit; `POST /budgets/generate` derives a plan from
    the previous three months.
-5. **Reports** — `GET /api/v1/reports?month=YYYY-MM` compares the month with
-   the previous one, ranks merchants, lists six-month history and writes plain
-   language insights.
+5. **Reports** — `GET /api/v1/reports?month=YYYY-MM` compares spending with
+   the previous month, ranks merchants, lists six-month history, exposes
+   `cashflow` (money in/out/net) and writes plain-language insights.
 6. **AI** — `POST /api/v1/ai/ask` builds a compact JSON context (totals,
-   budgets, merchants, history) and tries Ollama, then
-   `skills/spend_skill.py`, then built-in JS rules.
-7. **Demo** — `POST /api/v1/demo/load` replaces the user's transactions with
-   90 days of generated data for instant exploration.
+   budgets, merchants, history, per-row `flow`/`direction`) and tries Ollama,
+   then `skills/spend_skill.py`, then built-in JS rules. Spend questions ignore
+   non-spending rows; income and cash-flow questions use the flow fields.
+7. **Demo** — `POST /api/v1/demo/load` regenerates 90 days of demo data in a
+   tagged demo account (`source="demo"`). `POST /api/v1/demo/clear` removes
+   only those rows and the demo account; uploaded and manual data are never
+   touched.
 
 ## 4b. Frontend structure
 
@@ -102,29 +129,34 @@ src/
     ui.jsx                Card, Button, Badge, Spinner, EmptyState, ErrorNote
     charts.jsx            area trend, category donut, monthly bars (Recharts)
   pages/
-    Overview.jsx          KPIs, trend, donut, budget health, recent list
-    Transactions.jsx      search / category / waste filters, CSV export
+    Overview.jsx          account cards/total, KPIs, trend, donut, budget health, recent list
+    Accounts.jsx          add/list/delete accounts, per-account balances
+    Transactions.jsx      account scope, manual entry, inline category/account edit, delete, export
     Budgets.jsx           month stepper, ring, limits, alerts, smart plan
     Reports.jsx           totals, 6-month bars, category movement, merchants
     AiSkills.jsx          chat, suggestions, engine status
-    Import.jsx            PDF/CSV dropzone, demo loader, parsing explainer
-    Settings.jsx          account, runtime status, data controls
+    Import.jsx            PDF/CSV dropzone, account selector, dedupe result, demo loader
+    Settings.jsx          account, runtime status, remove demo data, clear all, sign out
   lib/
-    api.js                fetch wrapper, adds x-user-id
+    api.js                fetch wrapper, adds x-user-id, account-aware calls
     format.js             currency, dates, category colours
 server/
-  lib/demo.js             categorisation, summaries, demo generator
-  lib/statement.js        CSV/TSV/PDF parsing
-  lib/plan.js             budget plan, overrides, smart generation
-  lib/reports.js          monthly report builder
+  lib/accounts.js         derived balances, upload account matching, fingerprints, dedupe
+  lib/classify.js         flow/direction classification, spending vs income helpers, flow summaries
+  lib/statement.js        statement-type detection, PDF/CSV/TSV parsing, metadata
+  lib/plan.js             budget plan, overrides, smart generation (spending only)
+  lib/reports.js          monthly report builder, cash-flow insight (spending only)
   lib/ai.js               Ollama → Python → JS answer cascade
+  lib/demo.js             summary builder and flow-aware demo generator
 skills/spend_skill.py     deterministic offline Q&A skill
 ```
 
-Routing is `location.hash` (`#overview`, `#transactions`, `#budgets`,
-`#reports`, `#ai`, `#import`, `#settings`) so the back button and deep links
-work without a router dependency. Shared server state is fetched in `App.jsx`;
-budget/report/AI pages load their own month-scoped data.
+Routing is `location.hash` (`#overview`, `#accounts`, `#transactions`,
+`#budgets`, `#reports`, `#ai`, `#import`, `#settings`) so the back button and
+deep links work without a router dependency. Shared server state is fetched in
+`App.jsx`; the global account scope (`all`, an account id or `unassigned`) lives
+there and drives `/analytics/summary` and `/transactions`. Budget/report/AI
+pages load their own month-scoped data.
 
 Visual rules, tokens, breakpoints and accessibility checks live in
 [`DESIGN.md`](./DESIGN.md).
@@ -141,10 +173,35 @@ Waste drives three derived metrics: current waste total, `waste × 12`
 (annual projection), and the future value of investing that annual amount
 monthly for 10 years at 7% APY.
 
-These rules live in one place (`categorize()` in `server/lib/demo.js`) so they
-can be replaced by user-defined rules or an LLM classifier later.
+These rules live in one place (`categorize()` in `server/lib/classify.js`) so
+they can be replaced by user-defined rules or an LLM classifier later.
 
-## 5b. Budget model
+## 5b. Money-flow model
+
+`server/lib/classify.js` is the single source of truth for what a movement is:
+
+| `flow` | Meaning | `direction` |
+|---|---|---|
+| `income` | Salary, payroll, mobile/check deposit, interest | `in` |
+| `expense` | Purchases, bills, rent, subscriptions | `out` |
+| `fee` | ATM, late, overdraft, interest/finance charges | `out` |
+| `card_payment` | Payment from a bank account to a card, or received by a card | `out` / `in` |
+| `transfer` | Moves between the user's own accounts | `in` / `out` |
+| `refund` | Refund, reversal or chargeback | `in` |
+
+Helpers `isSpending()`, `isIncome()`, `flowOf()` and `directionOf()` are used by
+budgets, reports, analytics, AI answers and the UI. `summarizeFlows()` produces
+money in/out/net, per-flow totals and direction+category groups. Budgets,
+spending totals and “how much did I spend” answers include only
+`expense`/`fee` rows with `direction = "out"`.
+
+The CSV parser accepts `date`, `description` (or merchant/details/memo),
+`amount`, `debit`/`credit` and `type` columns, with comma or tab separators.
+PDF parsing also understands `CR`/`DR` markers, trailing-minus amounts,
+debit/credit section headings and credit-card `Payments and Credits` sections.
+
+
+## 5c. Budget model
 
 Twelve fixed categories ship by default: Housing, Groceries, Utilities,
 Transport, Health & Fitness, Dining Out, Subscriptions, Fees, Clothing,
@@ -153,6 +210,27 @@ Each has a standing `default` limit. Category status is `over` above 100%,
 `warn` at ≥80%, otherwise `ok`; the UI mirrors this as red/amber/green. The
 smart plan recomputes limits from the previous three months (average × 1.05,
 rounded to $5).
+
+## 5d. Accounts, scope and duplicate detection
+
+`server/lib/accounts.js` owns everything account-related:
+
+- `listAccounts()` derives each balance from `openingBalance` plus transaction
+  direction, and returns `totals` (assigned accounts) plus a separate
+  `unassigned` bucket.
+- `accountScope(accountId)` converts `all` / id / `unassigned` into Prisma
+  filters used by both `/transactions` and `/analytics/summary`.
+- `resolveUploadAccount()` picks the destination account for an import.
+- `transactionKey()` / `splitDuplicates()` generate the stable duplicate key
+  from account, date, amount, direction and normalised description. Legacy rows
+  with `accountId = null` are matched via the `*` account slot, so re-importing
+  old data does not double-count.
+- Manual entries use `flowDirection()` to derive `flow`/`direction` from the
+  selected kind, and immediately affect the derived balance.
+
+Deleting an account sets its transactions to `accountId = null` (unassigned)
+rather than deleting them. Deleting a transaction also silently moves the
+account balance back.
 
 ## 6. Deployment & portability
 

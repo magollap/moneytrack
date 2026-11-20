@@ -8,7 +8,7 @@ Payload:
   {
     "question": "...",
     "today": "YYYY-MM-DD",
-    "transactions": [{"date","description","amount","category","is_waste"}],
+    "transactions": [{"date","description","amount","category","flow","direction","is_waste"}],
     "budgets": [{"category","limit","spent","status","kind"}]
   }
 
@@ -37,6 +37,11 @@ CATEGORY_PATTERNS = [
     ("Miscellaneous", r"misc|household|amazon|target"),
     ("Savings", r"savings?|save"),
 ]
+
+MONTH_NAMES = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
 
 
 def money(value):
@@ -80,6 +85,23 @@ def period_for(question, today):
         return "the last 90 days", today - timedelta(days=90), today + timedelta(days=1)
     if re.search(r"(last|past) 30|a month", q):
         return "the last 30 days", today - timedelta(days=30), today + timedelta(days=1)
+
+    named = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december"
+        r"|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b(?:\s+(\d{4}))?",
+        q,
+    )
+    if named:
+        month = MONTH_NAMES[named.group(1)[:3]]
+        year = int(named.group(2)) if named.group(2) else today.year
+        # Without an explicit year, use the most recent occurrence of that month.
+        if not named.group(2) and month > today.month:
+            year -= 1
+        start = date(year, month, 1)
+        end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        label = f"{start.strftime('%B %Y')}"
+        return label, start, end
+
     return "this month", month_start(today, 0), month_start(today, 1)
 
 
@@ -106,13 +128,49 @@ def total(rows):
     return sum(abs(float(row.get("amount") or 0)) for row in rows)
 
 
+def flow_of(row):
+    flow = row.get("flow")
+    if flow:
+        return flow
+    category = row.get("category")
+    if category in ("Income", "Salary", "Deposits"):
+        return "income"
+    if category == "Refunds":
+        return "refund"
+    if category == "Transfers":
+        return "transfer"
+    if category == "Credit Card Payment":
+        return "card_payment"
+    if category == "Fees":
+        return "fee"
+    return "expense"
+
+
+def direction_of(row):
+    direction = row.get("direction")
+    if direction in ("in", "out"):
+        return direction
+    return "in" if flow_of(row) in ("income", "refund") else "out"
+
+
+def is_spending(row):
+    return flow_of(row) in ("expense", "fee") and direction_of(row) == "out"
+
+
+def is_income(row):
+    return flow_of(row) in ("income", "refund") and direction_of(row) == "in"
+
+
 def answer(question, payload):
     today = parse_date(payload.get("today")) or date.today()
     rows = payload.get("transactions") or []
     budgets = payload.get("budgets") or []
     category = detect_category(question)
     label, start, end = period_for(question, today)
-    scoped = filter_rows(rows, start, end, category)
+    period_rows = filter_rows(rows, start, end)
+    spend_rows = [row for row in period_rows if is_spending(row)]
+    income_rows = [row for row in period_rows if is_income(row)]
+    scoped = [row for row in spend_rows if not category or row.get("category") == category]
 
     if re.search(r"budget|limit|left|remaining|over", question, re.I):
         item = next((b for b in budgets if b.get("category") == category), None)
@@ -141,8 +199,53 @@ def answer(question, payload):
             return "budget", f"You have {money(remaining)} left of the {money(limit)} monthly plan."
         return "budget", "No budgets are configured yet. Set them on the Plan & Budget page."
 
+    if re.search(r"cash\s*flow|money in|money out|inflow|outflow|\bnet\b", question, re.I):
+        in_rows = [row for row in period_rows if direction_of(row) == "in"]
+        out_rows = [row for row in period_rows if direction_of(row) == "out"]
+        in_total = total(in_rows)
+        out_total = total(out_rows)
+        net = in_total - out_total
+        salary = total([row for row in income_rows if row.get("category") == "Salary"])
+        deposits = total([row for row in income_rows if row.get("category") == "Deposits"])
+        return "cashflow", (
+            f"In {label}, money in was {money(in_total)} (salary {money(salary)}, "
+            f"deposits {money(deposits)}) and money out was {money(out_total)}. "
+            f"Net cash flow: {'+' if net >= 0 else '-'}{money(abs(net))}."
+        )
+
+    if re.search(r"income|salary|paycheck|payroll|deposit|money in|earned|got paid", question, re.I):
+        scoped_income = [
+            row for row in income_rows if not category or row.get("category") == category
+        ]
+        income = total(scoped_income)
+        if not scoped_income:
+            scope = f" for {category}" if category else ""
+            return "income", f"No income or deposits were recorded in {label}{scope}."
+        amounts = defaultdict(float)
+        for row in scoped_income:
+            amounts[row.get("category", "Deposits")] += abs(float(row.get("amount") or 0))
+        breakdown = ", ".join(
+            f"{name} {money(amount)}"
+            for name, amount in sorted(amounts.items(), key=lambda item: item[1], reverse=True)
+        )
+        return "income", (
+            f"Money in for {label} was {money(income)} across "
+            f"{len(scoped_income)} transaction{'s' if len(scoped_income) != 1 else ''} "
+            f"({breakdown})."
+        )
+
+    if re.search(r"credit card payment|card payment|paid.*card|card.*paid", question, re.I):
+        card_rows = [row for row in period_rows if flow_of(row) == "card_payment"]
+        card_out = total([row for row in card_rows if direction_of(row) == "out"])
+        card_in = total([row for row in card_rows if direction_of(row) == "in"])
+        return "card_payment", (
+            f"Card payments in {label}: {money(card_out)} paid from bank accounts and "
+            f"{money(card_in)} received by cards across {len(card_rows)} "
+            f"transaction{'s' if len(card_rows) != 1 else ''}."
+        )
+
     if re.search(r"waste|leak|wasting", question, re.I):
-        waste_rows = [row for row in scoped if row.get("is_waste")]
+        waste_rows = [row for row in spend_rows if row.get("is_waste")]
         return "waste", (
             f"Waste in {label} was {money(total(waste_rows))} across "
             f"{len(waste_rows)} transactions."
@@ -161,13 +264,17 @@ def answer(question, payload):
 
     if re.search(r"how many|count|number of", question, re.I):
         return "count", (
-            f"{len(scoped)} transaction{'s' if len(scoped) != 1 else ''}"
+            f"{len(scoped)} spending transaction{'s' if len(scoped) != 1 else ''}"
             f"{f' for {category}' if category else ''} in {label}."
         )
 
     if re.search(r"compare|versus|vs\.?|more than|less than|change", question, re.I):
         prev_label, prev_start, prev_end = period_for("last month", today)
-        prev_rows = filter_rows(rows, prev_start, prev_end, category)
+        prev_rows = [
+            row
+            for row in filter_rows(rows, prev_start, prev_end)
+            if is_spending(row) and (not category or row.get("category") == category)
+        ]
         prev_total = total(prev_rows)
         current = total(scoped)
         if not prev_total:

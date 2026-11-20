@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { prisma } from './src/lib/db.js';
 import { buildSummary, generateDemoTransactions } from './server/lib/demo.js';
 import { parseStatementFile } from './server/lib/statement.js';
+import { summarizeFlows, isSpending } from './server/lib/classify.js';
 import {
   getBudgetState,
   setBudget,
@@ -16,6 +17,15 @@ import {
 } from './server/lib/plan.js';
 import { buildReport } from './server/lib/reports.js';
 import { aiStatus, askAi } from './server/lib/ai.js';
+import {
+  accountScope,
+  flowDirection,
+  isWasteCategory,
+  lastFour,
+  listAccounts,
+  resolveUploadAccount,
+  splitDuplicates,
+} from './server/lib/accounts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -76,11 +86,48 @@ app.post('/api/v1/demo/load', async (req, res) => {
     const userId = requireUser(req, res);
     if (!userId) return;
 
-    const demo = generateDemoTransactions();
-    await prisma.transaction.deleteMany({ where: { userId } });
-    await prisma.transaction.createMany({ data: demo.map((t) => ({ ...t, userId })) });
+    // Demo data is tagged and scoped to a demo account, so loading it never
+    // removes statements the user uploaded themselves.
+    let account = await prisma.account.findFirst({ where: { userId, isDemo: true } });
+    if (!account) {
+      account = await prisma.account.create({
+        data: {
+          userId,
+          name: 'Demo account',
+          type: 'checking',
+          institution: 'MoneyTrack Demo',
+          openingBalance: 2500,
+          isDemo: true,
+        },
+      });
+    }
 
-    ok(res, buildSummary(demo));
+    await prisma.transaction.deleteMany({ where: { userId, source: 'demo' } });
+    const demo = generateDemoTransactions();
+    await prisma.transaction.createMany({
+      data: demo.map((t) => ({
+        ...t,
+        userId,
+        accountId: account.id,
+        source: 'demo',
+      })),
+    });
+
+    ok(res, { ...buildSummary(demo), flows: summarizeFlows(demo), demo_account_id: account.id });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// Remove only the generated demo data, keeping uploaded/manual transactions.
+app.post('/api/v1/demo/clear', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+
+    const removed = await prisma.transaction.deleteMany({ where: { userId, source: 'demo' } });
+    await prisma.account.deleteMany({ where: { userId, isDemo: true } });
+    ok(res, { removed: removed.count, accounts: await listAccounts(prisma, userId) });
   } catch (err) {
     fail(res, err);
   }
@@ -117,18 +164,299 @@ app.post('/api/v1/transactions/upload', upload.single('file'), async (req, res) 
       );
     }
 
-    const parsed = result.rows;
-    await prisma.transaction.createMany({ data: parsed.map((t) => ({ ...t, userId })) });
+    let account = null;
+    try {
+      account = await resolveUploadAccount(prisma, userId, {
+        accountId: req.body?.account_id,
+        metadata: result,
+        statementType: result.statementType,
+      });
+    } catch (err) {
+      return fail(res, err, 400);
+    }
+
+    const accountId = account?.id || null;
+    const { fresh, duplicates } = await splitDuplicates(prisma, userId, accountId, result.rows);
+
+    const parsed = fresh.map((t) => ({
+      ...t,
+      userId,
+      accountId,
+      source: 'upload',
+      statementType: result.statementType,
+    }));
+
+    if (parsed.length) {
+      await prisma.transaction.createMany({ data: parsed });
+    }
 
     ok(res, {
       ...buildSummary(parsed),
+      flows: summarizeFlows(parsed),
       import: {
         source: result.source,
         pages: result.pages,
-        transactions: parsed.length,
+        statement_type: result.statementType,
+        institution: result.institution,
+        period: result.period,
+        account: result.account,
+        account_id: accountId,
+        account_name: account?.name || null,
+        transactions: result.rows.length,
+        imported: parsed.length,
+        duplicates,
         file: req.file.originalname,
       },
+      transactions: parsed.slice(0, 500).map((t) => ({
+        date: t.date,
+        description: t.description,
+        amount: t.amount,
+        category: t.category,
+        flow: t.flow,
+        direction: t.direction,
+        isWaste: t.isWaste,
+      })),
+      accounts: await listAccounts(prisma, userId),
     });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// --- MANUAL TRANSACTIONS ---
+app.post('/api/v1/transactions', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+
+    const body = req.body || {};
+    const description = String(body.description || '').trim();
+    if (!description) return fail(res, new Error('Description is required'), 400);
+
+    const amount = Math.abs(Number(body.amount));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return fail(res, new Error('Amount must be a positive number'), 400);
+    }
+
+    const date = body.date ? new Date(body.date) : new Date();
+    if (Number.isNaN(date.getTime())) return fail(res, new Error('Invalid date'), 400);
+
+    let accountId = null;
+    if (body.account_id && body.account_id !== 'unassigned') {
+      const account = await prisma.account.findFirst({ where: { id: body.account_id, userId } });
+      if (!account) return fail(res, new Error('Account not found'), 400);
+      accountId = account.id;
+    }
+
+    const category = String(body.category || 'Miscellaneous');
+    const kind = flowDirection(body.flow, body.direction);
+    const isWaste =
+      body.is_waste === undefined ? isWasteCategory(category) : Boolean(body.is_waste);
+
+    const created = await prisma.transaction.create({
+      data: {
+        userId,
+        accountId,
+        date,
+        description,
+        amount,
+        category,
+        flow: kind.flow,
+        direction: kind.direction,
+        source: 'manual',
+        isWaste,
+        notes: body.notes ? String(body.notes).slice(0, 500) : null,
+      },
+    });
+
+    ok(res, created);
+  } catch (err) {
+    fail(res, err, 400);
+  }
+});
+
+// Clear every transaction for the current user (accounts are kept).
+app.delete('/api/v1/transactions/all', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+    const removed = await prisma.transaction.deleteMany({ where: { userId } });
+    ok(res, { removed: removed.count });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+app.patch('/api/v1/transactions/:id', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+
+    const existing = await prisma.transaction.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) return fail(res, new Error('Transaction not found'), 404);
+
+    const body = req.body || {};
+    const data = {};
+
+    if (body.description !== undefined) {
+      const description = String(body.description).trim();
+      if (!description) return fail(res, new Error('Description cannot be empty'), 400);
+      data.description = description;
+    }
+    if (body.amount !== undefined) {
+      const amount = Math.abs(Number(body.amount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return fail(res, new Error('Amount must be a positive number'), 400);
+      }
+      data.amount = amount;
+    }
+    if (body.date !== undefined) {
+      const date = new Date(body.date);
+      if (Number.isNaN(date.getTime())) return fail(res, new Error('Invalid date'), 400);
+      data.date = date;
+    }
+    if (body.category !== undefined) {
+      data.category = String(body.category);
+      if (body.is_waste === undefined) data.isWaste = isWasteCategory(body.category);
+    }
+    if (body.is_waste !== undefined) data.isWaste = Boolean(body.is_waste);
+    if (body.notes !== undefined) data.notes = body.notes ? String(body.notes).slice(0, 500) : null;
+
+    if (body.account_id !== undefined) {
+      if (!body.account_id || body.account_id === 'unassigned') {
+        data.accountId = null;
+      } else {
+        const account = await prisma.account.findFirst({
+          where: { id: body.account_id, userId },
+        });
+        if (!account) return fail(res, new Error('Account not found'), 400);
+        data.accountId = account.id;
+      }
+    }
+
+    if (body.flow !== undefined || body.direction !== undefined) {
+      const kind = flowDirection(body.flow ?? existing.flow, body.direction ?? existing.direction);
+      data.flow = kind.flow;
+      data.direction = kind.direction;
+    }
+
+    const updated = await prisma.transaction.update({ where: { id: existing.id }, data });
+    ok(res, updated);
+  } catch (err) {
+    fail(res, err, 400);
+  }
+});
+
+app.delete('/api/v1/transactions/:id', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+    const removed = await prisma.transaction.deleteMany({
+      where: { id: req.params.id, userId },
+    });
+    if (!removed.count) return fail(res, new Error('Transaction not found'), 404);
+    ok(res, { deleted: true });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// --- ACCOUNTS ---
+app.get('/api/v1/accounts', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+    ok(res, await listAccounts(prisma, userId));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+app.post('/api/v1/accounts', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+
+    const body = req.body || {};
+    const name = String(body.name || '').trim();
+    if (!name) return fail(res, new Error('Account name is required'), 400);
+
+    const opening = Number(body.opening_balance ?? body.openingBalance ?? 0);
+    const account = await prisma.account.create({
+      data: {
+        userId,
+        name: name.slice(0, 80),
+        type: ['checking', 'savings', 'credit_card', 'cash'].includes(body.type)
+          ? body.type
+          : 'checking',
+        institution: String(body.institution || '').trim().slice(0, 80) || 'Manual',
+        last4: lastFour(body.last4),
+        openingBalance: Number.isFinite(opening) ? opening : 0,
+      },
+    });
+
+    ok(res, { account, accounts: await listAccounts(prisma, userId) });
+  } catch (err) {
+    fail(res, err, 400);
+  }
+});
+
+app.patch('/api/v1/accounts/:id', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+
+    const existing = await prisma.account.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) return fail(res, new Error('Account not found'), 404);
+
+    const body = req.body || {};
+    const data = {};
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) return fail(res, new Error('Account name cannot be empty'), 400);
+      data.name = name.slice(0, 80);
+    }
+    if (body.type !== undefined) {
+      if (!['checking', 'savings', 'credit_card', 'cash'].includes(body.type)) {
+        return fail(res, new Error('Unsupported account type'), 400);
+      }
+      data.type = body.type;
+    }
+    if (body.institution !== undefined) data.institution = String(body.institution).slice(0, 80);
+    if (body.last4 !== undefined) data.last4 = lastFour(body.last4);
+    if (body.opening_balance !== undefined || body.openingBalance !== undefined) {
+      const value = Number(body.opening_balance ?? body.openingBalance);
+      if (!Number.isFinite(value)) return fail(res, new Error('Invalid opening balance'), 400);
+      data.openingBalance = value;
+    }
+
+    await prisma.account.update({ where: { id: existing.id }, data });
+    ok(res, await listAccounts(prisma, userId));
+  } catch (err) {
+    fail(res, err, 400);
+  }
+});
+
+app.delete('/api/v1/accounts/:id', async (req, res) => {
+  try {
+    const userId = requireUser(req, res);
+    if (!userId) return;
+
+    const existing = await prisma.account.findFirst({
+      where: { id: req.params.id, userId },
+    });
+    if (!existing) return fail(res, new Error('Account not found'), 404);
+
+    await prisma.transaction.updateMany({
+      where: { userId, accountId: existing.id },
+      data: { accountId: null },
+    });
+    await prisma.account.delete({ where: { id: existing.id } });
+    ok(res, await listAccounts(prisma, userId));
   } catch (err) {
     fail(res, err);
   }
@@ -140,22 +468,28 @@ app.get('/api/v1/transactions', async (req, res) => {
     const userId = requireUser(req, res);
     if (!userId) return;
 
-    const { start_date, end_date, category, account_id, is_waste, q, limit } = req.query;
-    const where = { userId };
+    const { start_date, end_date, category, account_id, is_waste, q, limit, flow, direction } = req.query;
+    const where = { userId, ...accountScope(account_id) };
     if (start_date || end_date) {
       where.date = {};
       if (start_date) where.date.gte = new Date(start_date);
       if (end_date) where.date.lte = new Date(end_date);
     }
     if (category) where.category = category;
-    if (account_id) where.accountId = account_id;
     if (is_waste !== undefined) where.isWaste = is_waste === 'true';
+    if (flow) where.flow = flow;
+    if (direction) where.direction = direction;
     if (q) where.description = { contains: q };
 
     const data = await prisma.transaction.findMany({
       where,
       orderBy: { date: 'desc' },
       take: Math.min(Number(limit) || 500, 2000),
+      include: {
+        account: {
+          select: { id: true, name: true, type: true, institution: true, last4: true },
+        },
+      },
     });
 
     ok(res, data);
@@ -170,8 +504,10 @@ app.get('/api/v1/analytics/summary', async (req, res) => {
     const userId = requireUser(req, res);
     if (!userId) return;
 
-    const rows = await prisma.transaction.findMany({ where: { userId } });
-    ok(res, buildSummary(rows));
+    const rows = await prisma.transaction.findMany({
+      where: { userId, ...accountScope(req.query.account_id) },
+    });
+    ok(res, { ...buildSummary(rows), account_scope: req.query.account_id || 'all' });
   } catch (err) {
     fail(res, err);
   }
@@ -310,17 +646,30 @@ function summarize(list) {
   const byCategory = {};
   let spent = 0;
   let waste = 0;
+  let count = 0;
   for (const t of list) {
+    if (!isSpending(t)) continue;
     const amount = Math.abs(Number(t.amount) || 0);
     spent += amount;
     if (t.isWaste) waste += amount;
+    count += 1;
     byCategory[t.category] = Number(((byCategory[t.category] || 0) + amount).toFixed(2));
   }
+  const flows = summarizeFlows(list);
   return {
     spent: Number(spent.toFixed(2)),
     waste: Number(waste.toFixed(2)),
-    transactions: list.length,
+    transactions: count,
     by_category: byCategory,
+    money_in: flows.money_in,
+    money_out: flows.money_out,
+    net_cash_flow: flows.net,
+    income: flows.income,
+    refunds: flows.refunds,
+    card_payments_in: flows.card_payments_in,
+    card_payments_out: flows.card_payments_out,
+    transfers_in: flows.transfers_in,
+    transfers_out: flows.transfers_out,
   };
 }
 
@@ -334,6 +683,7 @@ function buildAiContext({ rows, budgets, report, month, lastMonth }) {
 
   const merchants = {};
   for (const t of recent90) {
+    if (!isSpending(t)) continue;
     const key = t.description;
     merchants[key] = merchants[key] || { amount: 0, count: 0 };
     merchants[key].amount += Math.abs(Number(t.amount) || 0);

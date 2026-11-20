@@ -8,9 +8,18 @@ import Reports from './pages/Reports'
 import AiSkills from './pages/AiSkills'
 import Import from './pages/Import'
 import Settings from './pages/Settings'
-import { getSummary, getTransactions, getStatus, getBudgets } from './lib/api'
+import Accounts from './pages/Accounts'
+import {
+  getSummary,
+  getTransactions,
+  getStatus,
+  getBudgets,
+  getAccounts,
+  updateTransaction,
+  deleteTransaction,
+} from './lib/api'
 
-const VIEWS = ['overview', 'transactions', 'budgets', 'reports', 'ai', 'import', 'settings']
+const VIEWS = ['overview', 'transactions', 'accounts', 'budgets', 'reports', 'ai', 'import', 'settings']
 
 function viewFromHash() {
   const hash = window.location.hash.replace('#', '')
@@ -22,6 +31,8 @@ export default function App() {
   const [view, setView] = useState(viewFromHash)
   const [summary, setSummary] = useState(null)
   const [transactions, setTransactions] = useState([])
+  const [accounts, setAccounts] = useState(null)
+  const [accountScope, setAccountScope] = useState('all')
   const [budgets, setBudgets] = useState(null)
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -39,26 +50,28 @@ export default function App() {
     setView(next)
   }, [])
 
-  const loadData = useCallback(async (currentUser, { silent = false } = {}) => {
+  const loadData = useCallback(async (currentUser, { silent = false, scope = accountScope } = {}) => {
     if (!currentUser) return
     silent ? setRefreshing(true) : setLoading(true)
     setError(null)
 
-    const [summaryRes, txRes, statusRes, budgetRes] = await Promise.allSettled([
-      getSummary(currentUser),
-      getTransactions(currentUser),
+    const [summaryRes, txRes, statusRes, budgetRes, accountRes] = await Promise.allSettled([
+      getSummary(currentUser, scope),
+      getTransactions(currentUser, scope),
       getStatus(currentUser),
       getBudgets(currentUser),
+      getAccounts(currentUser),
     ])
 
     if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value)
     if (txRes.status === 'fulfilled') setTransactions(txRes.value)
     if (statusRes.status === 'fulfilled') setStatus(statusRes.value)
     if (budgetRes.status === 'fulfilled') setBudgets(budgetRes.value)
+    if (accountRes.status === 'fulfilled') setAccounts(accountRes.value)
 
     if (summaryRes.status === 'rejected') setError(summaryRes.reason.message)
     silent ? setRefreshing(false) : setLoading(false)
-  }, [])
+  }, [accountScope])
 
   useEffect(() => {
     if (user) loadData(user)
@@ -66,6 +79,7 @@ export default function App() {
 
   const handleLogin = (loggedInUser) => {
     setUser(loggedInUser)
+    setAccountScope('all')
     navigate('overview')
   }
 
@@ -73,6 +87,8 @@ export default function App() {
     setUser(null)
     setSummary(null)
     setTransactions([])
+    setAccounts(null)
+    setAccountScope('all')
     setBudgets(null)
     setStatus(null)
     window.location.hash = ''
@@ -81,6 +97,38 @@ export default function App() {
   const handleImported = useCallback(async () => {
     await loadData(user, { silent: true })
   }, [user, loadData])
+
+  const handleSelectAccount = useCallback(
+    (id) => {
+      setAccountScope(id || 'all')
+      navigate('overview')
+    },
+    [navigate]
+  )
+
+  const handleUpdateTransaction = useCallback(
+    async (id, patch) => {
+      await updateTransaction(user, id, patch)
+      await loadData(user, { silent: true })
+    },
+    [user, loadData]
+  )
+
+  const handleDeleteTransaction = useCallback(
+    async (id) => {
+      await deleteTransaction(user, id)
+      await loadData(user, { silent: true })
+    },
+    [user, loadData]
+  )
+
+  const handleAccountsChanged = useCallback(
+    async (next) => {
+      if (next) setAccounts(next)
+      await loadData(user, { silent: true })
+    },
+    [user, loadData]
+  )
 
   const handleBudgetsChanged = useCallback((next) => {
     setBudgets(next)
@@ -101,6 +149,9 @@ export default function App() {
       onNavigate={navigate}
       onLogout={handleLogout}
       period={period}
+      accounts={accounts}
+      accountScope={accountScope}
+      onSelectAccount={handleSelectAccount}
     >
       {view === 'overview' && (
         <Overview
@@ -108,6 +159,9 @@ export default function App() {
           summary={summary}
           budgets={budgets}
           transactions={transactions}
+          accounts={accounts}
+          accountScope={accountScope}
+          onSelectAccount={handleSelectAccount}
           loading={loading}
           refreshing={refreshing}
           onNavigate={navigate}
@@ -118,9 +172,27 @@ export default function App() {
 
       {view === 'transactions' && (
         <Transactions
+          user={user}
           transactions={transactions}
+          accounts={accounts}
+          accountScope={accountScope}
+          onScopeChange={setAccountScope}
           loading={refreshing}
           onRefresh={() => loadData(user, { silent: true })}
+          onChanged={() => loadData(user, { silent: true })}
+          onUpdateTransaction={handleUpdateTransaction}
+          onDeleteTransaction={handleDeleteTransaction}
+        />
+      )}
+
+      {view === 'accounts' && (
+        <Accounts
+          user={user}
+          accounts={accounts}
+          accountScope={accountScope}
+          onSelectAccount={handleSelectAccount}
+          onChanged={handleAccountsChanged}
+          onScopeReset={() => setAccountScope('all')}
         />
       )}
 
@@ -133,7 +205,12 @@ export default function App() {
       {view === 'ai' && <AiSkills user={user} />}
 
       {view === 'import' && (
-        <Import user={user} onImported={handleImported} onNavigate={navigate} />
+        <Import
+          user={user}
+          accounts={accounts}
+          onImported={handleImported}
+          onNavigate={navigate}
+        />
       )}
 
       {view === 'settings' && (

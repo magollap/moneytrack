@@ -18,31 +18,41 @@ model User {
 }
 
 model Account {
-  id           String        @id @default(uuid())
-  userId       String
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name         String
-  type         String        // checking, savings, credit_card
-  institution  String
-  last4        String?
-  balance      Float         @default(0.0)
-  createdAt    DateTime      @default(now())
-  transactions Transaction[]
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  type           String        // checking, savings, credit_card, cash, mortgage
+  institution    String
+  last4          String?
+  openingBalance Float         @default(0.0)
+  balance        Float         @default(0.0) // legacy snapshot; current balance is derived from transactions
+  isDemo         Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  transactions   Transaction[]
 }
 
 model Transaction {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accountId   String?
-  account     Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  date        DateTime
-  description String
-  amount      Float
-  category    String
-  isWaste     Boolean  @default(false)
-  notes       String?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId     String?
+  account       Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  date          DateTime
+  description   String
+  amount        Float
+  category      String
+  flow          String   @default("expense") // income | expense | fee | card_payment | transfer | refund
+  direction     String   @default("out") // in | out
+  statementType String? // bank | credit_card | statement
+  source        String? // upload | manual | demo
+  fingerprint   String? // duplicate detection for statement imports
+  isWaste       Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId, accountId, date])
+  @@index([userId, fingerprint])
 }
 
 model Budget {

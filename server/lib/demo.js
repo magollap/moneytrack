@@ -1,63 +1,34 @@
-// Shared transaction helpers: categorisation, summaries and demo data.
+// Shared transaction helpers: summaries and demo data.
 
-export function categorize(desc) {
-  const d = String(desc || '').toLowerCase()
-  if (/(doordash|uber eats|grubhub|restaurant|starbucks|cafe|coffee|pizza|sushi|mcdonald|chipotle)/.test(d)) {
-    return { category: 'Dining Out', isWaste: true }
-  }
-  if (/(netflix|spotify|hulu|disney|subscription|prime video|icloud|youtube premium)/.test(d)) {
-    return { category: 'Subscriptions', isWaste: true }
-  }
-  if (/(grocery|supermarket|whole foods|kroger|aldi|costco|trader joe|safeway)/.test(d)) {
-    return { category: 'Groceries', isWaste: false }
-  }
-  if (/(shell|chevron|exxon|gas station|fuel|uber\s*\*?\s*trip|lyft|parking|transit)/.test(d)) {
-    return { category: 'Transport', isWaste: false }
-  }
-  if (/(electric|water bill|utility|internet|comcast|at&t|verizon|phone bill)/.test(d)) {
-    return { category: 'Utilities', isWaste: false }
-  }
-  if (/(rent|mortgage|landlord|hoa)/.test(d)) {
-    return { category: 'Housing', isWaste: false }
-  }
-  if (/(zara|h&m|uniqlo|nike|adidas|clothing|apparel|shoe|nordstrom)/.test(d)) {
-    return { category: 'Clothing', isWaste: false }
-  }
-  if (/(pharmacy|cvs|walgreens|clinic|dentist|gym|fitness|doctor|health)/.test(d)) {
-    return { category: 'Health & Fitness', isWaste: false }
-  }
-  if (/(steam|playstation|xbox|cinema|movie|concert|ticketmaster|entertainment)/.test(d)) {
-    return { category: 'Entertainment', isWaste: false }
-  }
-  if (/(amazon marketplace|target|walmart|etsy|household|misc)/.test(d)) {
-    return { category: 'Miscellaneous', isWaste: false }
-  }
-  if (/(salary|payroll|deposit|refund|transfer to savings)/.test(d)) {
-    return { category: 'Income', isWaste: false }
-  }
-  if (/(fee|late charge|atm fee|overdraft)/.test(d)) {
-    return { category: 'Fees', isWaste: true }
-  }
-  return { category: 'Miscellaneous', isWaste: false }
-}
+import { directionOf, flowOf, isIncome, isSpending, summarizeFlows } from './classify.js'
 
 export function buildSummary(rows) {
   const categoryMap = {}
   const dailyMap = {}
   const wasteMerchants = {}
   let totalSpent = 0
+  let incomeTotal = 0
   let wasteTotal = 0
 
   for (const t of rows) {
     const amount = Math.abs(Number(t.amount) || 0)
+    const day = new Date(t.date).toISOString().slice(0, 10)
+    dailyMap[day] = dailyMap[day] || { amount: 0, waste: 0, income: 0 }
+
+    if (isIncome(t)) {
+      incomeTotal += amount
+      dailyMap[day].income += amount
+      continue
+    }
+
+    if (!isSpending(t)) continue
+
     totalSpent += amount
     if (t.isWaste) wasteTotal += amount
     if (!categoryMap[t.category]) categoryMap[t.category] = { amount: 0, isWaste: t.isWaste }
     categoryMap[t.category].amount += amount
     if (t.isWaste) categoryMap[t.category].isWaste = true
 
-    const day = new Date(t.date).toISOString().slice(0, 10)
-    dailyMap[day] = dailyMap[day] || { amount: 0, waste: 0 }
     dailyMap[day].amount += amount
     if (t.isWaste) dailyMap[day].waste += amount
 
@@ -72,6 +43,7 @@ export function buildSummary(rows) {
       date,
       amount: Number(v.amount.toFixed(2)),
       waste: Number(v.waste.toFixed(2)),
+      income: Number(v.income.toFixed(2)),
     }))
 
   const topWaste = Object.entries(wasteMerchants)
@@ -104,14 +76,22 @@ export function buildSummary(rows) {
   const monthlyRate = 0.07 / 12
   const months = 120
   const futureValue = (annualWaste / 12) * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate)
+  const flows = summarizeFlows(rows)
 
   return {
     period,
     total_spent: Number(totalSpent.toFixed(2)),
+    income_total: Number(incomeTotal.toFixed(2)),
+    money_in: flows.money_in,
+    money_out: flows.money_out,
+    net_cash_flow: flows.net,
+    flows,
     waste_total: Number(wasteTotal.toFixed(2)),
     annual_waste_projection: Number(annualWaste.toFixed(2)),
     potential_investment_value_10yr: Number(futureValue.toFixed(2)),
     transaction_count: rows.length,
+    spending_count: rows.filter((t) => isSpending(t)).length,
+    income_count: rows.filter((t) => isIncome(t)).length,
     avg_daily_spend: Number((totalSpent / days).toFixed(2)),
     waste_share: totalSpent > 0 ? Number(((wasteTotal / totalSpent) * 100).toFixed(1)) : 0,
     categories,
@@ -148,20 +128,45 @@ export function generateDemoTransactions(days = 90) {
 
   const out = []
   const today = new Date()
+  const push = (date, description, amount, category, flow, direction, isWaste = false) =>
+    out.push({ date, description, amount, category, flow, direction, isWaste })
+
   for (let daysAgo = days - 1; daysAgo >= 0; daysAgo--) {
+    const date = new Date(today)
+    date.setDate(today.getDate() - daysAgo)
+    const dom = date.getDate()
+
+    // Salary, rent, card payments, transfers and deposits make the demo behave
+    // like a real bank statement, not an expenses-only spreadsheet.
+    if (dom === 1) {
+      push(date, 'ACME CORP PAYROLL DIRECT DEPOSIT', 3200, 'Salary', 'income', 'in')
+    }
+    if (dom === 2) {
+      push(date, 'ONLINE RENT PAYMENT', 1200, 'Housing', 'expense', 'out')
+    }
+    if (dom === 3) {
+      push(date, 'ONLINE PAYMENT TO VISA', 450, 'Credit Card Payment', 'card_payment', 'out')
+    }
+    if (dom === 15) {
+      push(date, 'TRANSFER TO SAVINGS', 300, 'Transfers', 'transfer', 'out')
+    }
+    if (dom === 20) {
+      push(date, 'MOBILE CHECK DEPOSIT', 150, 'Deposits', 'income', 'in')
+    }
+
     const count = Math.random() < 0.55 ? 1 : 0
     for (let c = 0; c < count; c++) {
       const [description, category, isWaste, min, max] = vendors[Math.floor(Math.random() * vendors.length)]
       const amount = Number((min + Math.random() * (max - min)).toFixed(2))
-      const date = new Date(today)
-      date.setDate(today.getDate() - daysAgo)
-      out.push({ date, description, amount, category, isWaste })
+      push(date, description, amount, category, 'expense', 'out', isWaste)
     }
   }
 
-  // Guarantee at least a few groceries and dining rows in the current month.
+  // Guarantee at least a few groceries in the current month.
   if (!out.some((t) => t.category === 'Groceries')) {
-    out.push({ date: today, description: 'KROGER SUPERMARKET', amount: 64.2, category: 'Groceries', isWaste: false })
+    push(today, 'KROGER SUPERMARKET', 64.2, 'Groceries', 'expense', 'out')
   }
   return out
 }
+
+export { flowOf, directionOf }

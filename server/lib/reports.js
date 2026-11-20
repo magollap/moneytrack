@@ -1,6 +1,7 @@
 // Monthly report builder: category comparison, merchant ranking, budget status.
 
 import { getBudgetState, monthKey, monthRange } from './plan.js'
+import { isSpending, summarizeFlows } from './classify.js'
 
 const DAY = 86400000
 
@@ -12,17 +13,21 @@ function shiftMonth(month, delta) {
 function totals(rows) {
   let spent = 0
   let waste = 0
+  let count = 0
   for (const t of rows) {
+    if (!isSpending(t)) continue
     const amount = Math.abs(Number(t.amount) || 0)
     spent += amount
     if (t.isWaste) waste += amount
+    count += 1
   }
-  return { spent: Number(spent.toFixed(2)), waste: Number(waste.toFixed(2)), count: rows.length }
+  return { spent: Number(spent.toFixed(2)), waste: Number(waste.toFixed(2)), count }
 }
 
 function byCategory(rows) {
   const map = new Map()
   for (const t of rows) {
+    if (!isSpending(t)) continue
     const amount = Math.abs(Number(t.amount) || 0)
     const entry = map.get(t.category) || { amount: 0, count: 0, isWaste: false }
     entry.amount += amount
@@ -79,6 +84,7 @@ export async function buildReport(prisma, userId, requestedMonth) {
   const merchants = new Map()
   const dailyMap = new Map()
   for (const t of current) {
+    if (!isSpending(t)) continue
     const amount = Math.abs(Number(t.amount) || 0)
     const key = t.description
     const m = merchants.get(key) || { amount: 0, count: 0, category: t.category, isWaste: Boolean(t.isWaste) }
@@ -147,6 +153,12 @@ export async function buildReport(prisma, userId, requestedMonth) {
       `Waste was $${currentTotals.waste.toFixed(2)}, or ${((currentTotals.waste / currentTotals.spent) * 100).toFixed(1)}% of the month.`
     )
   }
+  const currentFlows = summarizeFlows(current)
+  if (currentFlows.income > 0) {
+    insights.push(
+      `Money in was $${currentFlows.money_in.toFixed(2)} and money out was $${currentFlows.money_out.toFixed(2)} (net ${currentFlows.net >= 0 ? '+' : '-'}$${Math.abs(currentFlows.net).toFixed(2)}).`
+    )
+  }
 
   return {
     month,
@@ -163,6 +175,7 @@ export async function buildReport(prisma, userId, requestedMonth) {
       avg_per_day: Number((currentTotals.spent / spanDays).toFixed(2)),
       days: spanDays,
     },
+    cashflow: currentFlows,
     budgets,
     categories,
     top_merchants: topMerchants,

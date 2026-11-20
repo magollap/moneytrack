@@ -10,13 +10,13 @@
     "app:start": "bash scripts/moneytrack.sh start",
     "app:stop": "bash scripts/moneytrack.sh stop",
     "app:status": "bash scripts/moneytrack.sh status",
-    "db:push": "prisma7 db push",
+    "db:push": "prisma7 db push && prisma7 generate",
     "db:studio": "prisma7 studio",
     "db:seed": "node scripts/seed.js",
     "sample:pdf": "node scripts/make_sample_pdf.js",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node scripts/test-statements.js"
   },
   "keywords": [],
   "author": "",
